@@ -1,0 +1,1429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daddy's Dungeon 5e Map Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Cinzel+Decorative:wght@400;700&family=Luckiest+Guy&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .font-cinzel-decorative {
+            font-family: 'Cinzel Decorative', cursive;
+        }
+        .font-luckiest-guy {
+            font-family: 'Luckiest Guy', cursive;
+        }
+        /* Custom styling for range input thumb */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #d97706; /* amber-600 */
+            cursor: pointer;
+            box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.4); /* amber-600 with opacity */
+            transition: background .15s ease-in-out, box-shadow .15s ease-in-out;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #d97706; /* amber-600 */
+            cursor: pointer;
+            box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.4); /* amber-600 with opacity */
+            transition: background .15s ease-in-out, box-shadow .15s ease-in-out;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            background: #f59e0b; /* amber-500 */
+        }
+
+        input[type="range"]::-moz-range-thumb:hover {
+            background: #f59e0b; /* amber-500 */
+        }
+
+        /* Custom styling for range input track */
+        input[type="range"]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 8px;
+            background: #57534e; /* stone-600 */
+            border-radius: 4px;
+        }
+
+        input[type="range"]::-moz-range-track {
+            width: 100%;
+            height: 8px;
+            background: #57534e; /* stone-600 */
+            border-radius: 4px;
+        }
+
+        /* Custom scrollbar for controls section */
+        #controls::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #controls::-webkit-scrollbar-track {
+            background: #444;
+            border-radius: 10px;
+        }
+
+        #controls::-webkit-scrollbar-thumb {
+            background: #d97706; /* amber-600 */
+            border-radius: 10px;
+        }
+
+        #controls::-webkit-scrollbar-thumb:hover {
+            background: #f59e0b; /* amber-500 */
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-amber-950 to-stone-950 text-amber-100 p-4 sm:p-8 flex flex-col items-center">
+
+    <h1 class="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-red-600 mb-8 text-center font-cinzel-decorative">
+        Daddy's Dungeon 5e Map Generator
+    </h1>
+
+    <!-- Mode Selection Buttons -->
+    <div class="flex justify-center gap-4 mb-8">
+        <button id="worldMapBtn" class="px-6 py-3 rounded-lg font-bold text-lg transition duration-200 ease-in-out bg-amber-800 text-white shadow-lg">
+            World Map
+        </button>
+        <button id="dungeonBtn" class="px-6 py-3 rounded-lg font-bold text-lg transition duration-200 ease-in-out bg-stone-700 text-stone-300 hover:bg-stone-600">
+            Dungeon
+        </button>
+        <button id="castleBtn" class="px-6 py-3 rounded-lg font-bold text-lg transition duration-200 ease-in-out bg-stone-700 text-stone-300 hover:bg-stone-600">
+            Castle
+        </button>
+    </div>
+
+    <div class="flex flex-col lg:flex-row gap-8 w-full max-w-6xl">
+        <!-- Controls Section -->
+        <div id="controls" class="lg:w-1/3 bg-stone-800 p-6 rounded-xl shadow-2xl flex flex-col space-y-6 border border-stone-700 lg:max-h-[80vh] lg:overflow-y-auto">
+            <!-- Controls will be dynamically loaded here by JavaScript -->
+        </div>
+
+        <!-- Map Display Section -->
+        <div class="lg:w-2/3 bg-stone-800 p-6 rounded-xl shadow-2xl flex items-center justify-center relative overflow-hidden border border-stone-700">
+            <canvas id="mapCanvas" class="border-2 border-gray-700 rounded-lg shadow-lg" style="width: 100%; height: auto;"></canvas>
+        </div>
+    </div>
+
+    <!-- Explanation Block -->
+    <div id="explanationBlock" class="bg-stone-800 p-6 rounded-xl shadow-2xl mt-8 w-full max-w-6xl border border-stone-700">
+        <!-- Explanation will be dynamically loaded here by JavaScript -->
+    </div>
+
+    <script>
+        // Perlin Noise implementation
+        class PerlinNoise {
+            constructor(seed = Date.now()) {
+                this.p = new Array(512);
+                this.permutation = new Array(256);
+                this.seed = seed;
+                this.initPermutation();
+            }
+
+            initPermutation() {
+                let s = this.seed;
+                const random = () => {
+                    s = (s * 9301 + 49297) % 233280;
+                    return s / 233280;
+                };
+
+                for (let i = 0; i < 256; i++) {
+                    this.permutation[i] = i;
+                }
+
+                for (let i = 0; i < 256; i++) {
+                    const r = Math.floor(random() * (256 - i)) + i;
+                    [this.permutation[i], this.permutation[r]] = [this.permutation[r], this.permutation[i]];
+                }
+
+                for (let i = 0; i < 256; i++) {
+                    this.p[i] = this.p[i + 256] = this.permutation[i];
+                }
+            }
+
+            fade(t) {
+                return t * t * t * (t * (t * 6 - 15) + 10);
+            }
+
+            lerp(t, a, b) {
+                return a + t * (b - a);
+            }
+
+            grad(hash, x, y) {
+                const h = hash & 15;
+                const u = h < 8 ? x : y;
+                const v = h < 4 ? y : h === 12 || h === 14 ? x : 0;
+                return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+            }
+
+            noise(x, y) {
+                let X = Math.floor(x) & 255;
+                let Y = Math.floor(y) & 255;
+
+                x -= Math.floor(x);
+                y -= Math.floor(y);
+
+                let u = this.fade(x);
+                let v = this.fade(y);
+
+                let A = this.p[X] + Y;
+                let B = this.p[X + 1] + Y;
+
+                return this.lerp(v,
+                    this.lerp(u, this.grad(this.p[A], x, y), this.grad(this.p[B], x - 1, y)),
+                    this.lerp(u, this.grad(this.p[A + 1], x, y - 1), this.grad(this.p[B + 1], x - 1, y - 1))
+                );
+            }
+        }
+
+        // Helper function to draw grid
+        const drawGrid = (ctx, width, height, gridSize, strokeStyle = 'rgba(0, 0, 0, 0.3)', lineWidth = 0.5) => {
+            ctx.strokeStyle = strokeStyle;
+            ctx.lineWidth = lineWidth;
+
+            for (let x = 0; x <= width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, height);
+                ctx.stroke();
+            }
+
+            for (let y = 0; y <= height; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+        };
+
+        // Helper function to draw watermark
+        const drawWatermark = (ctx, width, height, text, font, size, color, opacity) => {
+            ctx.save(); // Save the current context state
+            ctx.globalAlpha = opacity;
+            ctx.fillStyle = color;
+            ctx.font = `${size}px "${font}"`; // Ensure font name is quoted for multi-word fonts
+            ctx.textAlign = 'right'; // Position at right
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(text, width - 20, height - 20); // Position at bottom right with padding
+            ctx.restore(); // Restore the context state
+        };
+
+        // Global state variables
+        let generationMode = 'world';
+        const perlinNoiseInstance = new PerlinNoise(); // Single instance for re-seeding
+
+        // Initial options - width/height will be dynamically set by resizeCanvas
+        let worldMapOptions = {
+            width: 0, // Will be set dynamically
+            height: 0, // Will be set dynamically
+            seed: Date.now(),
+            scale: 100,
+            octaves: 4,
+            persistence: 0.5,
+            lacunarity: 2.0,
+            showGrid: true,
+            gridColor: 'rgba(0, 0, 0, 0.3)',
+            biomeThresholds: {
+                deepWater: 0.1,
+                shallowWater: 0.2,
+                beach: 0.3,
+                grassland: 0.5,
+                forest: 0.65,
+                hills: 0.75,
+                desert: 0.8,
+                swamp: 0.85,
+                ice: 0.9,
+                volcano: 0.95,
+                mountains: 1.0,
+            },
+            biomeColors: {
+                deepWater: '#00008B',
+                shallowWater: '#4682B4',
+                beach: '#F4A460',
+                grassland: '#228B22',
+                forest: '#006400',
+                hills: '#8B4513',
+                desert: '#DAA520',
+                swamp: '#556B2F',
+                ice: '#ADD8E6',
+                volcano: '#8B0000',
+                mountains: '#A9A9A9',
+            }
+        };
+
+        let dungeonOptions = {
+            width: 0, // Will be set dynamically
+            height: 0, // Will be set dynamically
+            seed: Date.now() + 1,
+            numRooms: 10,
+            minRoomSize: 20,
+            maxRoomSize: 50,
+            corridorWidth: 5,
+            wallColor: '#333333',
+            floorColor: '#666666',
+            doorColor: '#8B4513',
+            pillarColor: '#444444',
+            stairsColor: '#777777',
+            pitColor: '#1A1A1A',
+            chestColor: '#B8860B',
+            trapColor: '#DC143C',
+            altarColor: '#800080',
+            brazierColor: '#FFD700',
+            brokenWallColor: '#5C4033',
+            secretDoorColor: '#666666',
+            treasurePileColor: '#FFD700',
+            monsterLairColor: '#4B0082',
+            showGrid: true,
+            gridColor: 'rgba(255, 255, 255, 0.2)',
+        };
+
+        let castleOptions = {
+            width: 0, // Will be set dynamically
+            height: 0, // Will be set dynamically
+            seed: Date.now() + 2,
+            castleSize: 0.7,
+            numTowers: 4,
+            wallThickness: 15,
+            wallColor: '#8B4513',
+            roofColor: '#A9A9A9',
+            courtyardColor: '#228B22',
+            keepColor: '#5C4033',
+            gateColor: '#6B4226',
+            moatColor: '#00008B',
+            innerBuildingColor: '#777777',
+            throneColor: '#800000',
+            weaponRackColor: '#556B2F',
+            furnitureColor: '#A0522D',
+            barracksColor: '#696969',
+            kitchenColor: '#B0C4DE',
+            storeroomColor: '#CD853F',
+            gardenColor: '#6B8E23',
+            trainingGroundColor: '#8B4513',
+            showGrid: true,
+            gridColor: 'rgba(0, 0, 0, 0.2)',
+        };
+
+        // Fixed Watermark Options
+        const watermarkOptions = {
+            text: "Daddy's Dungeon",
+            font: 'Luckiest Guy',
+            size: 24,
+            color: '#000000', // Black color
+            opacity: 0.7,
+        };
+
+        const mapCanvas = document.getElementById('mapCanvas');
+        const controlsDiv = document.getElementById('controls');
+        const explanationBlockDiv = document.getElementById('explanationBlock');
+
+        // Function to resize the canvas dynamically
+        const resizeCanvas = () => {
+            const parentDiv = mapCanvas.parentElement;
+            const aspectRatio = 4 / 3; // Standard map aspect ratio (width / height)
+
+            let newWidth = parentDiv.clientWidth;
+            let newHeight = newWidth / aspectRatio;
+
+            // If the calculated height is too tall for the parent, adjust based on height
+            if (newHeight > parentDiv.clientHeight) {
+                newHeight = parentDiv.clientHeight;
+                newWidth = newHeight * aspectRatio;
+            }
+
+            mapCanvas.width = newWidth;
+            mapCanvas.height = newHeight;
+
+            // Update the current mode's options with the new canvas dimensions
+            if (generationMode === 'world') {
+                worldMapOptions.width = newWidth;
+                worldMapOptions.height = newHeight;
+            } else if (generationMode === 'dungeon') {
+                dungeonOptions.width = newWidth;
+                dungeonOptions.height = newHeight;
+            } else if (generationMode === 'castle') {
+                castleOptions.width = newWidth;
+                castleOptions.height = newHeight;
+            }
+
+            renderMap(); // Redraw map with new dimensions
+        };
+
+        // --- Map Drawing Functions ---
+
+        const drawWorldMap = () => {
+            const ctx = mapCanvas.getContext('2d');
+            ctx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+            perlinNoiseInstance.seed = worldMapOptions.seed; // Re-seed Perlin noise
+
+            for (let y = 0; y < mapCanvas.height; y++) {
+                for (let x = 0; x < mapCanvas.width; x++) {
+                    let noiseValue = 0;
+                    let amplitude = 1;
+                    let frequency = 1;
+
+                    for (let i = 0; i < worldMapOptions.octaves; i++) {
+                        noiseValue += perlinNoiseInstance.noise(x / worldMapOptions.scale * frequency, y / worldMapOptions.scale * frequency) * amplitude;
+                        amplitude *= worldMapOptions.persistence;
+                        frequency *= worldMapOptions.lacunarity;
+                    }
+
+                    noiseValue = (noiseValue + 1) / 2; // Normalize to 0-1
+
+                    let color;
+                    if (noiseValue < worldMapOptions.biomeThresholds.deepWater) {
+                        color = worldMapOptions.biomeColors.deepWater;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.shallowWater) {
+                        color = worldMapOptions.biomeColors.shallowWater;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.beach) {
+                        color = worldMapOptions.biomeColors.beach;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.grassland) {
+                        color = worldMapOptions.biomeColors.grassland;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.forest) {
+                        color = worldMapOptions.biomeColors.forest;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.hills) {
+                        color = worldMapOptions.biomeColors.hills;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.desert) {
+                        color = worldMapOptions.biomeColors.desert;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.swamp) {
+                        color = worldMapOptions.biomeColors.swamp;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.ice) {
+                        color = worldMapOptions.biomeColors.ice;
+                    } else if (noiseValue < worldMapOptions.biomeThresholds.volcano) {
+                        color = worldMapOptions.biomeColors.volcano;
+                    } else {
+                        color = worldMapOptions.biomeColors.mountains;
+                    }
+
+                    ctx.fillStyle = color;
+                    ctx.fillRect(x, y, 1, 1);
+                }
+            }
+
+            if (worldMapOptions.showGrid) {
+                drawGrid(ctx, mapCanvas.width, mapCanvas.height, 20, worldMapOptions.gridColor);
+            }
+            drawWatermark(ctx, mapCanvas.width, mapCanvas.height, watermarkOptions.text, watermarkOptions.font, watermarkOptions.size, watermarkOptions.color, watermarkOptions.opacity);
+        };
+
+        const drawDungeon = () => {
+            const ctx = mapCanvas.getContext('2d');
+            ctx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+            ctx.fillStyle = dungeonOptions.wallColor;
+            ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+            let s = dungeonOptions.seed;
+            const random = () => {
+                s = (s * 9301 + 49297) % 233280;
+                return s / 233280;
+            };
+
+            const rooms = [];
+            const maxAttempts = 200;
+
+            const checkOverlap = (newRoom, padding = 5) => {
+                for (const existingRoom of rooms) {
+                    if (
+                        newRoom.x < existingRoom.x + existingRoom.w + padding &&
+                        newRoom.x + newRoom.w + padding > existingRoom.x &&
+                        newRoom.y < existingRoom.y + existingRoom.h + padding &&
+                        newRoom.y + newRoom.h + padding > existingRoom.y
+                    ) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+            for (let i = 0; i < dungeonOptions.numRooms; i++) {
+                let placed = false;
+                let attempts = 0;
+                while (!placed && attempts < maxAttempts) {
+                    const rw = Math.floor(random() * (dungeonOptions.maxRoomSize - dungeonOptions.minRoomSize + 1)) + dungeonOptions.minRoomSize;
+                    const rh = Math.floor(random() * (dungeonOptions.maxRoomSize - dungeonOptions.minRoomSize + 1)) + dungeonOptions.minRoomSize;
+                    const rx = Math.floor(random() * (mapCanvas.width - rw));
+                    const ry = Math.floor(random() * (mapCanvas.height - rh));
+                    const newRoom = { x: rx, y: ry, w: rw, h: rh };
+
+                    if (!checkOverlap(newRoom)) {
+                        rooms.push(newRoom);
+                        placed = true;
+                    }
+                    attempts++;
+                }
+            }
+
+            ctx.fillStyle = dungeonOptions.floorColor;
+            rooms.forEach(room => {
+                ctx.fillRect(room.x, room.y, room.w, room.h);
+
+                const maxFeatures = Math.floor(random() * 4);
+                for (let i = 0; i < maxFeatures; i++) {
+                    const featureType = Math.floor(random() * 11); // 0-10
+                    const featureSize = Math.floor(random() * 10) + 10;
+                    const fx = room.x + Math.floor(random() * (room.w - featureSize));
+                    const fy = room.y + Math.floor(random() * (room.h - featureSize));
+
+                    switch (featureType) {
+                        case 0: // Pillar
+                            ctx.fillStyle = dungeonOptions.pillarColor;
+                            ctx.fillRect(fx, fy, featureSize, featureSize);
+                            break;
+                        case 1: // Stairs
+                            ctx.fillStyle = dungeonOptions.stairsColor;
+                            ctx.fillRect(fx, fy, featureSize, featureSize / 2);
+                            ctx.fillRect(fx, fy + featureSize / 2, featureSize / 2, featureSize / 2);
+                            ctx.fillRect(fx + featureSize / 2, fy, featureSize / 2, featureSize / 2);
+                            ctx.strokeStyle = dungeonOptions.wallColor;
+                            ctx.lineWidth = 1;
+                            ctx.beginPath(); ctx.moveTo(fx, fy + featureSize / 2); ctx.lineTo(fx + featureSize, fy + featureSize / 2); ctx.stroke();
+                            ctx.beginPath(); ctx.moveTo(fx + featureSize / 2, fy); ctx.lineTo(fx + featureSize / 2, fy + featureSize); ctx.stroke();
+                            break;
+                        case 2: // Pit
+                            ctx.fillStyle = dungeonOptions.pitColor;
+                            ctx.fillRect(fx, fy, featureSize, featureSize);
+                            ctx.strokeStyle = dungeonOptions.wallColor;
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(fx, fy, featureSize, featureSize);
+                            break;
+                        case 3: // Chest
+                            ctx.fillStyle = dungeonOptions.chestColor;
+                            ctx.fillRect(fx, fy, featureSize * 0.8, featureSize * 0.6);
+                            ctx.strokeStyle = dungeonOptions.wallColor;
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(fx, fy, featureSize * 0.8, featureSize * 0.6);
+                            break;
+                        case 4: // Trap (simple X)
+                            ctx.strokeStyle = dungeonOptions.trapColor;
+                            ctx.lineWidth = 2;
+                            ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + featureSize, fy + featureSize); ctx.stroke();
+                            ctx.beginPath(); ctx.moveTo(fx + featureSize, fy); ctx.lineTo(fx, fy + featureSize); ctx.stroke();
+                            break;
+                        case 5: // Altar
+                            ctx.fillStyle = dungeonOptions.altarColor;
+                            ctx.fillRect(fx, fy + featureSize * 0.2, featureSize, featureSize * 0.8);
+                            ctx.fillRect(fx + featureSize * 0.2, fy, featureSize * 0.6, featureSize * 0.2);
+                            ctx.strokeStyle = dungeonOptions.wallColor;
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(fx, fy + featureSize * 0.2, featureSize, featureSize * 0.8);
+                            ctx.strokeRect(fx + featureSize * 0.2, fy, featureSize * 0.6, featureSize * 0.2);
+                            break;
+                        case 6: // Brazier
+                            ctx.fillStyle = dungeonOptions.brazierColor;
+                            ctx.beginPath(); ctx.arc(fx + featureSize / 2, fy + featureSize / 2, featureSize / 3, 0, Math.PI * 2); ctx.fill();
+                            ctx.fillStyle = 'rgba(255, 165, 0, 0.5)';
+                            ctx.beginPath(); ctx.arc(fx + featureSize / 2, fy + featureSize / 2, featureSize / 2, 0, Math.PI * 2); ctx.fill();
+                            break;
+                        case 7: // Broken Wall
+                            ctx.strokeStyle = dungeonOptions.brokenWallColor;
+                            ctx.lineWidth = 2;
+                            ctx.beginPath();
+                            ctx.moveTo(fx, fy + featureSize * random());
+                            ctx.lineTo(fx + featureSize * random(), fy);
+                            ctx.lineTo(fx + featureSize, fy + featureSize * random());
+                            ctx.stroke();
+                            break;
+                        case 8: // Secret Door
+                            ctx.fillStyle = dungeonOptions.secretDoorColor;
+                            ctx.fillRect(fx, fy, featureSize, featureSize / 4);
+                            break;
+                        case 9: // Treasure Pile
+                            ctx.fillStyle = dungeonOptions.treasurePileColor;
+                            ctx.beginPath();
+                            ctx.moveTo(fx, fy + featureSize / 2);
+                            ctx.lineTo(fx + featureSize / 3, fy);
+                            ctx.lineTo(fx + featureSize, fy + featureSize / 3);
+                            ctx.lineTo(fx + featureSize * 2 / 3, fy + featureSize);
+                            ctx.closePath();
+                            ctx.fill();
+                            break;
+                        case 10: // Monster Lair
+                            ctx.fillStyle = dungeonOptions.monsterLairColor;
+                            ctx.beginPath(); ctx.arc(fx + featureSize / 2, fy + featureSize / 2, featureSize / 2, 0, Math.PI * 2); ctx.fill();
+                            ctx.strokeStyle = dungeonOptions.wallColor;
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                            break;
+                    }
+                }
+            });
+
+            ctx.fillStyle = dungeonOptions.floorColor;
+            for (let i = 0; i < rooms.length - 1; i++) {
+                const r1 = rooms[i];
+                const r2 = rooms[i + 1];
+
+                const c1x = r1.x + r1.w / 2;
+                const c1y = r1.y + r1.h / 2;
+                const c2x = r2.x + r2.w / 2;
+                const c2y = r2.y + r2.h / 2;
+
+                if (random() < 0.5) {
+                    ctx.fillRect(Math.min(c1x, c2x), c1y - dungeonOptions.corridorWidth / 2, Math.abs(c1x - c2x) + dungeonOptions.corridorWidth, dungeonOptions.corridorWidth);
+                    ctx.fillRect(c2x - dungeonOptions.corridorWidth / 2, Math.min(c1y, c2y), dungeonOptions.corridorWidth, Math.abs(c1y - c2y) + dungeonOptions.corridorWidth);
+                } else {
+                    ctx.fillRect(c1x - dungeonOptions.corridorWidth / 2, Math.min(c1y, c2y), dungeonOptions.corridorWidth, Math.abs(c1y - c2y) + dungeonOptions.corridorWidth);
+                    ctx.fillRect(Math.min(c1x, c2x), c2y - dungeonOptions.corridorWidth / 2, Math.abs(c1x - c2x) + dungeonOptions.corridorWidth, dungeonOptions.corridorWidth);
+                }
+
+                if (random() < 0.7) {
+                    ctx.fillStyle = dungeonOptions.doorColor;
+                    const doorThickness = dungeonOptions.corridorWidth / 2;
+                    const doorLength = dungeonOptions.corridorWidth;
+
+                    if (Math.abs(c1x - c2x) > Math.abs(c1y - c2y)) {
+                        const doorX = Math.min(c1x, c2x) + Math.floor(random() * Math.abs(c1x - c2x));
+                        ctx.fillRect(doorX, c1y - doorLength / 2, doorThickness, doorLength);
+                    } else {
+                        const doorY = Math.min(c1y, c2y) + Math.floor(random() * Math.abs(c1y - c2y));
+                        ctx.fillRect(c1x - doorLength / 2, doorY, doorLength, doorThickness);
+                    }
+                    ctx.fillStyle = dungeonOptions.floorColor;
+                }
+            }
+
+            if (dungeonOptions.showGrid) {
+                drawGrid(ctx, mapCanvas.width, mapCanvas.height, 20, dungeonOptions.gridColor, 0.5);
+            }
+            drawWatermark(ctx, mapCanvas.width, mapCanvas.height, watermarkOptions.text, watermarkOptions.font, watermarkOptions.size, watermarkOptions.color, watermarkOptions.opacity);
+        };
+
+        const drawCastle = () => {
+            const ctx = mapCanvas.getContext('2d');
+            ctx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+            ctx.fillStyle = castleOptions.courtyardColor;
+            ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+            let s = castleOptions.seed;
+            const random = () => {
+                s = (s * 9301 + 49297) % 233280;
+                return s / 233280;
+            };
+
+            const centerX = mapCanvas.width / 2;
+            const centerY = mapCanvas.height / 2;
+
+            const baseCastleDim = Math.min(mapCanvas.width, mapCanvas.height) * castleOptions.castleSize;
+            const castleWidth = baseCastleDim;
+            const castleHeight = baseCastleDim;
+
+            const wallX = centerX - castleWidth / 2;
+            const wallY = centerY - castleHeight / 2;
+
+            if (castleOptions.moatColor) {
+                const moatOffset = castleOptions.wallThickness * 1.5;
+                ctx.fillStyle = castleOptions.moatColor;
+                ctx.fillRect(wallX - moatOffset, wallY - moatOffset, castleWidth + 2 * moatOffset, castleHeight + 2 * moatOffset);
+            }
+
+            ctx.fillStyle = castleOptions.wallColor;
+            ctx.fillRect(wallX, wallY, castleWidth, castleOptions.wallThickness);
+            ctx.fillRect(wallX, wallY + castleHeight - castleOptions.wallThickness, castleWidth, castleOptions.wallThickness);
+            ctx.fillRect(wallX, wallY + castleOptions.wallThickness, castleOptions.wallThickness, castleHeight - 2 * castleOptions.wallThickness);
+            ctx.fillRect(wallX + castleWidth - castleOptions.wallThickness, wallY + castleOptions.wallThickness, castleOptions.wallThickness, castleHeight - 2 * castleOptions.wallThickness);
+
+            const crenelationSize = castleOptions.wallThickness / 2;
+            const crenelationGap = castleOptions.wallThickness / 2;
+
+            for (let x = wallX; x < wallX + castleWidth - crenelationSize; x += (crenelationSize + crenelationGap)) {
+                ctx.fillRect(x, wallY - crenelationSize, crenelationSize, crenelationSize);
+            }
+            for (let x = wallX; x < wallX + castleWidth - crenelationSize; x += (crenelationSize + crenelationGap)) {
+                ctx.fillRect(x, wallY + castleHeight, crenelationSize, crenelationSize);
+            }
+            for (let y = wallY; y < wallY + castleHeight - crenelationSize; y += (crenelationSize + crenelationGap)) {
+                ctx.fillRect(wallX - crenelationSize, y, crenelationSize, crenelationSize);
+            }
+            for (let y = wallY; y < wallY + castleHeight - crenelationSize; y += (crenelationSize + crenelationGap)) {
+                ctx.fillRect(wallX + castleWidth, y, crenelationSize, crenelationSize);
+            }
+
+            ctx.fillStyle = castleOptions.roofColor;
+            const towerSize = castleOptions.wallThickness * 2;
+            const cornerOffset = castleOptions.wallThickness / 2;
+
+            ctx.fillRect(wallX - cornerOffset, wallY - cornerOffset, towerSize, towerSize);
+            ctx.fillRect(wallX + castleWidth - towerSize + cornerOffset, wallY - cornerOffset, towerSize, towerSize);
+            ctx.fillRect(wallX - cornerOffset, wallY + castleHeight - towerSize + cornerOffset, towerSize, towerSize);
+            ctx.fillRect(wallX + castleWidth - towerSize + cornerOffset, wallY + castleHeight - towerSize + cornerOffset, towerSize, towerSize);
+
+            if (castleOptions.numTowers > 4) {
+                const numAdditionalTowers = castleOptions.numTowers - 4;
+                const perimeterPoints = [];
+
+                for (let x = wallX + towerSize; x < wallX + castleWidth - towerSize; x += (towerSize + castleOptions.wallThickness * 2)) {
+                    perimeterPoints.push({ x: x, y: wallY - cornerOffset });
+                }
+                for (let y = wallY + towerSize; y < wallY + castleHeight - towerSize; y += (towerSize + castleOptions.wallThickness * 2)) {
+                    perimeterPoints.push({ x: wallX + castleWidth - towerSize + cornerOffset, y: y });
+                }
+                for (let x = wallX + castleWidth - towerSize; x > wallX + towerSize; x -= (towerSize + castleOptions.wallThickness * 2)) {
+                    perimeterPoints.push({ x: x, y: wallY + castleHeight - towerSize + cornerOffset });
+                }
+                for (let y = wallY + castleHeight - towerSize; y > wallY + towerSize; y -= (towerSize + castleOptions.wallThickness * 2)) {
+                    perimeterPoints.push({ x: wallX - cornerOffset, y: y });
+                }
+
+                for (let i = perimeterPoints.length - 1; i > 0; i--) {
+                    const j = Math.floor(random() * (i + 1));
+                    [perimeterPoints[i], perimeterPoints[j]] = [perimeterPoints[j], perimeterPoints[i]];
+                }
+
+                for (let i = 0; i < numAdditionalTowers && i < perimeterPoints.length; i++) {
+                    const p = perimeterPoints[i];
+                    ctx.fillRect(p.x, p.y, towerSize, towerSize);
+                }
+            }
+
+            ctx.fillStyle = castleOptions.keepColor;
+            const keepWidth = castleWidth * 0.4;
+            const keepHeight = castleHeight * 0.4;
+            const keepX = centerX - keepWidth / 2;
+            const keepY = centerY - keepHeight / 2;
+            ctx.fillRect(keepX, keepY, keepWidth, keepHeight);
+
+            ctx.fillStyle = castleOptions.throneColor;
+            const throneSize = Math.min(keepWidth, keepHeight) * 0.2;
+            ctx.fillRect(keepX + keepWidth / 2 - throneSize / 2, keepY + keepHeight * 0.7, throneSize, throneSize);
+
+            const innerAreaX = wallX + castleOptions.wallThickness;
+            const innerAreaY = wallY + castleOptions.wallThickness;
+            const innerAreaWidth = castleWidth - 2 * castleOptions.wallThickness;
+            const innerAreaHeight = castleHeight - 2 * castleOptions.wallThickness;
+
+            const numInnerBuildings = Math.floor(random() * 3) + 1;
+            for (let i = 0; i < numInnerBuildings; i++) {
+                const buildingType = Math.floor(random() * 4); // 0: general, 1: barracks, 2: kitchen, 3: storeroom
+                let currentBuildingColor = castleOptions.innerBuildingColor;
+
+                if (buildingType === 1) {
+                    currentBuildingColor = castleOptions.barracksColor;
+                } else if (buildingType === 2) {
+                    currentBuildingColor = castleOptions.kitchenColor;
+                } else if (buildingType === 3) {
+                    currentBuildingColor = castleOptions.storeroomColor;
+                }
+
+                const buildingWidth = Math.floor(random() * (innerAreaWidth * 0.2)) + (innerAreaWidth * 0.1);
+                const buildingHeight = Math.floor(random() * (innerAreaHeight * 0.2)) + (innerAreaHeight * 0.1);
+                const buildingX = innerAreaX + Math.floor(random() * (innerAreaWidth - buildingWidth));
+                const buildingY = innerAreaY + Math.floor(random() * (innerAreaHeight - buildingHeight));
+
+                ctx.fillStyle = currentBuildingColor;
+                ctx.fillRect(buildingX, buildingY, buildingWidth, buildingHeight);
+
+                const numItems = Math.floor(random() * 3);
+                for (let j = 0; j < numItems; j++) {
+                    const itemType = Math.floor(random() * 2);
+                    const itemSize = Math.floor(random() * 8) + 5;
+                    const itemX = buildingX + Math.floor(random() * (buildingWidth - itemSize));
+                    const itemY = buildingY + Math.floor(random() * (buildingHeight - itemSize));
+
+                    if (itemType === 0) {
+                        ctx.fillStyle = castleOptions.weaponRackColor;
+                        ctx.fillRect(itemX, itemY, itemSize, itemSize * 2);
+                        ctx.fillRect(itemX, itemY + itemSize, itemSize * 2, itemSize / 4);
+                    } else {
+                        ctx.fillStyle = castleOptions.furnitureColor;
+                        ctx.fillRect(itemX, itemY, itemSize * 1.5, itemSize);
+                    }
+                }
+            }
+
+            if (random() < 0.5 && castleOptions.gardenColor) {
+                const gardenSize = Math.min(innerAreaWidth, innerAreaHeight) * (0.1 + random() * 0.2);
+                const gardenX = innerAreaX + Math.floor(random() * (innerAreaWidth - gardenSize));
+                const gardenY = innerAreaY + Math.floor(random() * (innerAreaHeight - gardenSize));
+                ctx.fillStyle = castleOptions.gardenColor;
+                ctx.fillRect(gardenX, gardenY, gardenSize, gardenSize);
+            }
+            if (random() < 0.5 && castleOptions.trainingGroundColor) {
+                const tgSize = Math.min(innerAreaWidth, innerAreaHeight) * (0.1 + random() * 0.2);
+                const tgX = innerAreaX + Math.floor(random() * (innerAreaWidth - tgSize));
+                const tgY = innerAreaY + Math.floor(random() * (innerAreaHeight - tgSize));
+                ctx.fillStyle = castleOptions.trainingGroundColor;
+                ctx.fillRect(tgX, tgY, tgSize, tgSize);
+                ctx.strokeStyle = castleOptions.wallColor;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(tgX, tgY, tgSize, tgSize);
+            }
+
+            ctx.fillStyle = castleOptions.gateColor;
+            const gateWidth = castleOptions.wallThickness * 4;
+            const gateHeight = castleOptions.wallThickness * 3;
+            ctx.fillRect(centerX - gateWidth / 2, wallY - gateHeight + castleOptions.wallThickness, gateWidth, gateHeight);
+            ctx.fillStyle = castleOptions.courtyardColor;
+            ctx.fillRect(centerX - (gateWidth / 2) + castleOptions.wallThickness, wallY + castleOptions.wallThickness, gateWidth - 2 * castleOptions.wallThickness, castleOptions.wallThickness);
+
+            if (castleOptions.showGrid) {
+                drawGrid(ctx, mapCanvas.width, mapCanvas.height, 20, castleOptions.gridColor, 0.5);
+            }
+            drawWatermark(ctx, mapCanvas.width, mapCanvas.height, watermarkOptions.text, watermarkOptions.font, watermarkOptions.size, watermarkOptions.color, watermarkOptions.opacity);
+        };
+
+        // --- UI Rendering and Event Handling ---
+
+        const renderWorldMapControls = () => {
+            controlsDiv.innerHTML = `
+                <h2 class="text-2xl font-bold text-amber-100 mb-4">World Map Options</h2>
+                <div class="flex flex-col">
+                    <label for="worldWidth" class="text-stone-300 mb-1">Width:</label>
+                    <input type="number" id="worldWidth" name="width" value="${mapCanvas.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                </div>
+                <div class="flex flex-col">
+                    <label for="worldHeight" class="text-stone-300 mb-1">Height:</label>
+                    <input type="number" id="worldHeight" name="height" value="${mapCanvas.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                </div>
+                <div class="flex flex-col">
+                    <label for="worldScale" class="text-stone-300 mb-1">Detail Scale (<span id="worldScaleValue">${worldMapOptions.scale.toFixed(0)}</span>):</label>
+                    <input type="range" id="worldScale" name="scale" min="10" max="300" step="1" value="${worldMapOptions.scale}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="worldOctaves" class="text-stone-300 mb-1">Complexity (Octaves: <span id="worldOctavesValue">${worldMapOptions.octaves}</span>):</label>
+                    <input type="range" id="worldOctaves" name="octaves" min="1" max="8" step="1" value="${worldMapOptions.octaves}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="worldPersistence" class="text-stone-300 mb-1">Roughness (Persistence: <span id="worldPersistenceValue">${worldMapOptions.persistence.toFixed(2)}</span>):</label>
+                    <input type="range" id="worldPersistence" name="persistence" min="0.1" max="1.0" step="0.1" value="${worldMapOptions.persistence}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="worldLacunarity" class="text-stone-300 mb-1">Feature Size (Lacunarity: <span id="worldLacunarityValue">${worldMapOptions.lacunarity.toFixed(1)}</span>):</label>
+                    <input type="range" id="worldLacunarity" name="lacunarity" min="1.5" max="3.0" step="0.1" value="${worldMapOptions.lacunarity}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+
+                <h3 class="text-xl font-bold text-amber-100 mt-4 mb-2">Biome Thresholds</h3>
+                ${Object.keys(worldMapOptions.biomeThresholds).map(key => `
+                    <div class="flex flex-col">
+                        <label for="biomeThresholds.${key}" class="text-stone-300 mb-1 capitalize">${key.replace(/([A-Z])/g, ' $1')}: <span id="biomeThresholds.${key}Value">${worldMapOptions.biomeThresholds[key].toFixed(2)}</span></label>
+                        <input type="range" id="biomeThresholds.${key}" name="biomeThresholds.${key}" min="0.0" max="1.0" step="0.01" value="${worldMapOptions.biomeThresholds[key]}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                    </div>
+                `).join('')}
+
+                <h3 class="text-xl font-bold text-amber-100 mt-4 mb-2">Biome Colors</h3>
+                ${Object.keys(worldMapOptions.biomeColors).map(key => `
+                    <div class="flex items-center">
+                        <label for="biomeColors.${key}" class="text-stone-300 mr-2 capitalize">${key.replace(/([A-Z])/g, ' $1')}:</label>
+                        <input type="color" id="biomeColors.${key}" name="biomeColors.${key}" value="${worldMapOptions.biomeColors[key]}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${worldMapOptions.biomeColors[key]}" data-name="biomeColors.${key}" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                `).join('')}
+
+                <div class="flex items-center justify-between">
+                    <label class="text-stone-300">Seed: <span id="worldSeedValue">${worldMapOptions.seed}</span></label>
+                    <button id="newWorldSeedBtn" class="px-4 py-2 bg-blue-800 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105">New Seed</button>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="worldShowGrid" name="showGrid" ${worldMapOptions.showGrid ? 'checked' : ''} class="form-checkbox h-5 w-5 text-amber-500 rounded border-stone-600 bg-stone-700 focus:ring-amber-500" />
+                    <label for="worldShowGrid" class="ml-2 text-stone-300">Show Grid</label>
+                </div>
+                <div class="flex flex-col">
+                    <label for="worldGridColor" class="text-stone-300 mb-1">Grid Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="worldGridColor" name="gridColor" value="${worldMapOptions.gridColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${worldMapOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <button id="exportMapBtn" class="mt-6 w-full py-3 bg-green-700 hover:bg-green-600 text-white font-bold text-lg rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
+                    Export Map as PNG
+                </button>
+            `;
+
+            // Add event listeners for world map controls
+            controlsDiv.querySelectorAll('input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    const name = e.target.name || e.target.dataset.name;
+                    const value = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' || e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value);
+
+                    if (name.startsWith('biomeColors.')) {
+                        const colorKey = name.split('.')[1];
+                        worldMapOptions.biomeColors[colorKey] = value;
+                    } else if (name.startsWith('biomeThresholds.')) {
+                        const thresholdKey = name.split('.')[1];
+                        worldMapOptions.biomeThresholds[thresholdKey] = value;
+                        document.getElementById(`biomeThresholds.${thresholdKey}Value`).textContent = value.toFixed(2);
+                    } else {
+                        worldMapOptions[name] = value;
+                    }
+
+                    if (e.target.type === 'range') {
+                        document.getElementById(`${e.target.id}Value`).textContent = value.toFixed(e.target.id.includes('persistence') || e.target.id.includes('lacunarity') ? 1 : 0);
+                    }
+                    renderMap();
+                });
+            });
+            document.getElementById('newWorldSeedBtn').addEventListener('click', () => {
+                worldMapOptions.seed = Date.now();
+                document.getElementById('worldSeedValue').textContent = worldMapOptions.seed;
+                renderMap();
+            });
+            document.getElementById('exportMapBtn').addEventListener('click', exportMap);
+        };
+
+        const renderDungeonControls = () => {
+            controlsDiv.innerHTML = `
+                <h2 class="text-2xl font-bold text-amber-100 mb-4">Dungeon Options</h2>
+                <div class="flex flex-col">
+                    <label for="dungeonWidth" class="text-stone-300 mb-1">Width:</label>
+                    <input type="number" id="dungeonWidth" name="width" value="${mapCanvas.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonHeight" class="text-stone-300 mb-1">Height:</label>
+                    <input type="number" id="dungeonHeight" name="height" value="${mapCanvas.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonNumRooms" class="text-stone-300 mb-1">Number of Rooms (<span id="dungeonNumRoomsValue">${dungeonOptions.numRooms}</span>):</label>
+                    <input type="range" id="dungeonNumRooms" name="numRooms" min="1" max="50" step="1" value="${dungeonOptions.numRooms}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonMinRoomSize" class="text-stone-300 mb-1">Min Room Size (<span id="dungeonMinRoomSizeValue">${dungeonOptions.minRoomSize}</span>):</label>
+                    <input type="range" id="dungeonMinRoomSize" name="minRoomSize" min="10" max="100" step="1" value="${dungeonOptions.minRoomSize}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonMaxRoomSize" class="text-stone-300 mb-1">Max Room Size (<span id="dungeonMaxRoomSizeValue">${dungeonOptions.maxRoomSize}</span>):</label>
+                    <input type="range" id="dungeonMaxRoomSize" name="maxRoomSize" min="20" max="200" step="1" value="${dungeonOptions.maxRoomSize}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonCorridorWidth" class="text-stone-300 mb-1">Corridor Width (<span id="dungeonCorridorWidthValue">${dungeonOptions.corridorWidth}</span>):</label>
+                    <input type="range" id="dungeonCorridorWidth" name="corridorWidth" min="1" max="20" step="1" value="${dungeonOptions.corridorWidth}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonWallColor" class="text-stone-300 mb-1">Wall Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonWallColor" name="wallColor" value="${dungeonOptions.wallColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.wallColor}" data-name="wallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonFloorColor" class="text-stone-300 mb-1">Floor Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonFloorColor" name="floorColor" value="${dungeonOptions.floorColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.floorColor}" data-name="floorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonDoorColor" class="text-stone-300 mb-1">Door Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonDoorColor" name="doorColor" value="${dungeonOptions.doorColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.doorColor}" data-name="doorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonPillarColor" class="text-stone-300 mb-1">Pillar Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonPillarColor" name="pillarColor" value="${dungeonOptions.pillarColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.pillarColor}" data-name="pillarColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonStairsColor" class="text-stone-300 mb-1">Stairs Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonStairsColor" name="stairsColor" value="${dungeonOptions.stairsColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.stairsColor}" data-name="stairsColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonPitColor" class="text-stone-300 mb-1">Pit Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonPitColor" name="pitColor" value="${dungeonOptions.pitColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.pitColor}" data-name="pitColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonChestColor" class="text-stone-300 mb-1">Chest Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonChestColor" name="chestColor" value="${dungeonOptions.chestColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.chestColor}" data-name="chestColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonTrapColor" class="text-stone-300 mb-1">Trap Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonTrapColor" name="trapColor" value="${dungeonOptions.trapColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.trapColor}" data-name="trapColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonAltarColor" class="text-stone-300 mb-1">Altar Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonAltarColor" name="altarColor" value="${dungeonOptions.altarColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.altarColor}" data-name="altarColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonBrazierColor" class="text-stone-300 mb-1">Brazier Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonBrazierColor" name="brazierColor" value="${dungeonOptions.brazierColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.brazierColor}" data-name="brazierColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonBrokenWallColor" class="text-stone-300 mb-1">Broken Wall Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonBrokenWallColor" name="brokenWallColor" value="${dungeonOptions.brokenWallColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.brokenWallColor}" data-name="brokenWallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonSecretDoorColor" class="text-stone-300 mb-1">Secret Door Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonSecretDoorColor" name="secretDoorColor" value="${dungeonOptions.secretDoorColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.secretDoorColor}" data-name="secretDoorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonTreasurePileColor" class="text-stone-300 mb-1">Treasure Pile Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonTreasurePileColor" name="treasurePileColor" value="${dungeonOptions.treasurePileColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.treasurePileColor}" data-name="treasurePileColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonMonsterLairColor" class="text-stone-300 mb-1">Monster Lair Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonMonsterLairColor" name="monsterLairColor" value="${dungeonOptions.monsterLairColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.monsterLairColor}" data-name="monsterLairColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex items-center justify-between">
+                    <label class="text-stone-300">Seed: <span id="dungeonSeedValue">${dungeonOptions.seed}</span></label>
+                    <button id="newDungeonSeedBtn" class="px-4 py-2 bg-blue-800 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105">New Seed</button>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="dungeonShowGrid" name="showGrid" ${dungeonOptions.showGrid ? 'checked' : ''} class="form-checkbox h-5 w-5 text-amber-500 rounded border-stone-600 bg-stone-700 focus:ring-amber-500" />
+                    <label for="dungeonShowGrid" class="ml-2 text-stone-300">Show Grid</label>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonGridColor" class="text-stone-300 mb-1">Grid Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="dungeonGridColor" name="gridColor" value="${dungeonOptions.gridColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${dungeonOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <button id="exportMapBtn" class="mt-6 w-full py-3 bg-green-700 hover:bg-green-600 text-white font-bold text-lg rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
+                    Export Map as PNG
+                </button>
+            `;
+
+            controlsDiv.querySelectorAll('input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    const name = e.target.name || e.target.dataset.name;
+                    const value = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' || e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value);
+                    dungeonOptions[name] = value;
+                    if (e.target.type === 'range') {
+                        document.getElementById(`${e.target.id}Value`).textContent = value;
+                    }
+                    renderMap();
+                });
+            });
+            document.getElementById('newDungeonSeedBtn').addEventListener('click', () => {
+                dungeonOptions.seed = Date.now() + 1;
+                document.getElementById('dungeonSeedValue').textContent = dungeonOptions.seed;
+                renderMap();
+            });
+            document.getElementById('exportMapBtn').addEventListener('click', exportMap);
+        };
+
+        const renderCastleControls = () => {
+            controlsDiv.innerHTML = `
+                <h2 class="text-2xl font-bold text-amber-100 mb-4">Castle Options</h2>
+                <div class="flex flex-col">
+                    <label for="castleWidth" class="text-stone-300 mb-1">Width:</label>
+                    <input type="number" id="castleWidth" name="width" value="${mapCanvas.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleHeight" class="text-stone-300 mb-1">Height:</label>
+                    <input type="number" id="castleHeight" name="height" value="${mapCanvas.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleSize" class="text-stone-300 mb-1">Castle Size (<span id="castleSizeValue">${castleOptions.castleSize.toFixed(2)}</span>):</label>
+                    <input type="range" id="castleSize" name="castleSize" min="0.3" max="1.0" step="0.05" value="${castleOptions.castleSize}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleNumTowers" class="text-stone-300 mb-1">Number of Towers (<span id="castleNumTowersValue">${castleOptions.numTowers}</span>):</label>
+                    <input type="range" id="castleNumTowers" name="numTowers" min="0" max="10" step="1" value="${castleOptions.numTowers}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleWallThickness" class="text-stone-300 mb-1">Wall Thickness (<span id="castleWallThicknessValue">${castleOptions.wallThickness}</span>):</label>
+                    <input type="range" id="castleWallThickness" name="wallThickness" min="5" max="50" step="1" value="${castleOptions.wallThickness}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleWallColor" class="text-stone-300 mb-1">Wall Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleWallColor" name="wallColor" value="${castleOptions.wallColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.wallColor}" data-name="wallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleRoofColor" class="text-stone-300 mb-1">Roof Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleRoofColor" name="roofColor" value="${castleOptions.roofColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.roofColor}" data-name="roofColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleCourtyardColor" class="text-stone-300 mb-1">Courtyard Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleCourtyardColor" name="courtyardColor" value="${castleOptions.courtyardColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.courtyardColor}" data-name="courtyardColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleKeepColor" class="text-stone-300 mb-1">Keep Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleKeepColor" name="keepColor" value="${castleOptions.keepColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.keepColor}" data-name="keepColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleGateColor" class="text-stone-300 mb-1">Gate Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleGateColor" name="gateColor" value="${castleOptions.gateColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.gateColor}" data-name="gateColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleMoatColor" class="text-stone-300 mb-1">Moat Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleMoatColor" name="moatColor" value="${castleOptions.moatColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.moatColor}" data-name="moatColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleInnerBuildingColor" class="text-stone-300 mb-1">Inner Building Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleInnerBuildingColor" name="innerBuildingColor" value="${castleOptions.innerBuildingColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.innerBuildingColor}" data-name="innerBuildingColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleThroneColor" class="text-stone-300 mb-1">Throne Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleThroneColor" name="throneColor" value="${castleOptions.throneColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.throneColor}" data-name="throneColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleWeaponRackColor" class="text-stone-300 mb-1">Weapon Rack Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleWeaponRackColor" name="weaponRackColor" value="${castleOptions.weaponRackColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.weaponRackColor}" data-name="weaponRackColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleFurnitureColor" class="text-stone-300 mb-1">Furniture Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleFurnitureColor" name="furnitureColor" value="${castleOptions.furnitureColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.furnitureColor}" data-name="furnitureColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleBarracksColor" class="text-stone-300 mb-1">Barracks Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleBarracksColor" name="barracksColor" value="${castleOptions.barracksColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.barracksColor}" data-name="barracksColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleKitchenColor" class="text-stone-300 mb-1">Kitchen Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleKitchenColor" name="kitchenColor" value="${castleOptions.kitchenColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.kitchenColor}" data-name="kitchenColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleStoreroomColor" class="text-stone-300 mb-1">Storeroom Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleStoreroomColor" name="storeroomColor" value="${castleOptions.storeroomColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.storeroomColor}" data-name="storeroomColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleGardenColor" class="text-stone-300 mb-1">Garden Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleGardenColor" name="gardenColor" value="${castleOptions.gardenColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.gardenColor}" data-name="gardenColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleTrainingGroundColor" class="text-stone-300 mb-1">Training Ground Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleTrainingGroundColor" name="trainingGroundColor" value="${castleOptions.trainingGroundColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.trainingGroundColor}" data-name="trainingGroundColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <div class="flex items-center justify-between">
+                    <label class="text-stone-300">Seed: <span id="castleSeedValue">${castleOptions.seed}</span></label>
+                    <button id="newCastleSeedBtn" class="px-4 py-2 bg-blue-800 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105">New Seed</button>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="castleShowGrid" name="showGrid" ${castleOptions.showGrid ? 'checked' : ''} class="form-checkbox h-5 w-5 text-amber-500 rounded border-stone-600 bg-stone-700 focus:ring-amber-500" />
+                    <label for="castleShowGrid" class="ml-2 text-stone-300">Show Grid</label>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleGridColor" class="text-stone-300 mb-1">Grid Color:</label>
+                    <div class="flex items-center">
+                        <input type="color" id="castleGridColor" name="gridColor" value="${castleOptions.gridColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
+                        <input type="text" value="${castleOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                    </div>
+                </div>
+                <button id="exportMapBtn" class="mt-6 w-full py-3 bg-green-700 hover:bg-green-600 text-white font-bold text-lg rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
+                    Export Map as PNG
+                </button>
+            `;
+
+            controlsDiv.querySelectorAll('input').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    const name = e.target.name || e.target.dataset.name;
+                    const value = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' || e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value);
+                    castleOptions[name] = value;
+                    if (e.target.type === 'range') {
+                        document.getElementById(`${e.target.id}Value`).textContent = value.toFixed(e.target.id.includes('Size') ? 2 : 0);
+                    }
+                    renderMap();
+                });
+            });
+            document.getElementById('newCastleSeedBtn').addEventListener('click', () => {
+                castleOptions.seed = Date.now() + 2;
+                document.getElementById('castleSeedValue').textContent = castleOptions.seed;
+                renderMap();
+            });
+            document.getElementById('exportMapBtn').addEventListener('click', exportMap);
+        };
+
+        const renderExplanationBlock = () => {
+            let content = '';
+            if (generationMode === 'world') {
+                content = `
+                    <h2 class="text-2xl font-bold text-amber-100 mb-4">World Map Legend</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        ${Object.entries(worldMapOptions.biomeColors).map(([key, color]) => `
+                            <div class="flex items-center">
+                                <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${color};"></div>
+                                <span class="text-stone-300 capitalize">${key.replace(/([A-Z])/g, ' $1')}</span>
+                            </div>
+                        `).join('')}
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${worldMapOptions.gridColor};"></div>
+                            <span class="text-stone-300 capitalize">Grid Lines</span>
+                        </div>
+                    </div>
+                `;
+            } else if (generationMode === 'dungeon') {
+                content = `
+                    <h2 class="text-2xl font-bold text-amber-100 mb-4">Dungeon Map Legend</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.wallColor};"></div>
+                            <span class="text-stone-300">Walls</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.floorColor};"></div>
+                            <span class="text-stone-300">Floor/Rooms/Corridors</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.doorColor};"></div>
+                            <span class="text-stone-300">Doors</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.pillarColor};"></div>
+                            <span class="text-stone-300">Pillars</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.stairsColor};"></div>
+                            <span class="text-stone-300">Stairs</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.pitColor};"></div>
+                            <span class="text-stone-300">Pits</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.chestColor};"></div>
+                            <span class="text-stone-300">Chests</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="border-color: ${dungeonOptions.trapColor}; border-width: 2px; border-style: solid;"></div>
+                            <span class="text-stone-300">Traps (X)</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.altarColor};"></div>
+                            <span class="text-stone-300">Altars</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${dungeonOptions.brazierColor};"></div>
+                            <span class="text-stone-300">Braziers</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="border-color: ${dungeonOptions.brokenWallColor}; border-width: 2px; border-style: dashed;"></div>
+                            <span class="text-stone-300">Broken Walls</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.secretDoorColor};"></div>
+                            <span class="text-stone-300">Secret Doors</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${dungeonOptions.treasurePileColor};"></div>
+                            <span class="text-stone-300">Treasure Piles</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${dungeonOptions.monsterLairColor};"></div>
+                            <span class="text-stone-300">Monster Lairs</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${dungeonOptions.gridColor};"></div>
+                            <span class="text-stone-300">Grid Lines</span>
+                        </div>
+                    </div>
+                `;
+            } else if (generationMode === 'castle') {
+                content = `
+                    <h2 class="text-2xl font-bold text-amber-100 mb-4">Castle Map Legend</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.wallColor};"></div>
+                            <span class="text-stone-300">Walls / Crenellations</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.roofColor};"></div>
+                            <span class="text-stone-300">Tower Roofs</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.courtyardColor};"></div>
+                            <span class="text-stone-300">Courtyard</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.keepColor};"></div>
+                            <span class="text-stone-300">Central Keep</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.gateColor};"></div>
+                            <span class="text-stone-300">Gatehouse</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.moatColor};"></div>
+                            <span class="text-stone-300">Moat</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.innerBuildingColor};"></div>
+                            <span class="text-stone-300">Inner Buildings (General)</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.barracksColor};"></div>
+                            <span class="text-stone-300">Barracks</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.kitchenColor};"></div>
+                            <span class="text-stone-300">Kitchen</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.storeroomColor};"></div>
+                            <span class="text-stone-300">Storeroom</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.gardenColor};"></div>
+                            <span class="text-stone-300">Gardens</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.trainingGroundColor};"></div>
+                            <span class="text-stone-300">Training Grounds</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.throneColor};"></div>
+                            <span class="text-stone-300">Throne</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.weaponRackColor};"></div>
+                            <span class="text-stone-300">Weapon Racks</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-sm mr-3 border border-stone-600" style="background-color: ${castleOptions.furnitureColor};"></div>
+                            <span class="text-stone-300">Furniture</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${castleOptions.gridColor};"></div>
+                            <span class="text-stone-300">Grid Lines</span>
+                        </div>
+                    </div>
+                `;
+            }
+            explanationBlockDiv.innerHTML = content;
+        };
+
+        const renderMap = () => {
+            if (generationMode === 'world') {
+                drawWorldMap();
+                renderWorldMapControls();
+            } else if (generationMode === 'dungeon') {
+                drawDungeon();
+                renderDungeonControls();
+            } else if (generationMode === 'castle') {
+                drawCastle();
+                renderCastleControls();
+            }
+            renderExplanationBlock();
+        };
+
+        const exportMap = () => {
+            const image = mapCanvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.href = image;
+            link.download = `${generationMode}_map_${Date.now()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+
+        // --- Initial Render and Mode Switching ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set initial button active state
+            document.getElementById('worldMapBtn').classList.add('bg-amber-800', 'text-white', 'shadow-lg');
+            document.getElementById('worldMapBtn').classList.remove('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+
+            resizeCanvas(); // Initial canvas sizing and map render
+
+            document.getElementById('worldMapBtn').addEventListener('click', () => {
+                generationMode = 'world';
+                document.getElementById('worldMapBtn').classList.add('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('worldMapBtn').classList.remove('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                document.getElementById('dungeonBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('dungeonBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                document.getElementById('castleBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('castleBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                resizeCanvas(); // Recalculate and redraw for new mode
+            });
+
+            document.getElementById('dungeonBtn').addEventListener('click', () => {
+                generationMode = 'dungeon';
+                document.getElementById('dungeonBtn').classList.add('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('dungeonBtn').classList.remove('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                document.getElementById('worldMapBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('worldMapBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                document.getElementById('castleBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('castleBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                resizeCanvas(); // Recalculate and redraw for new mode
+            });
+
+            document.getElementById('castleBtn').addEventListener('click', () => {
+                generationMode = 'castle';
+                document.getElementById('castleBtn').classList.add('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('castleBtn').classList.remove('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                document.getElementById('worldMapBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('worldMapBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                document.getElementById('dungeonBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
+                document.getElementById('dungeonBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
+                resizeCanvas(); // Recalculate and redraw for new mode
+            });
+
+            // Add event listener for window resize
+            window.addEventListener('resize', resizeCanvas);
+        });
+    </script>
+</body>
+</html>
