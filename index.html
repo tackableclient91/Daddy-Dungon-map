@@ -80,12 +80,25 @@
         #controls::-webkit-scrollbar-thumb:hover {
             background: #f59e0b; /* amber-500 */
         }
+
+        /* Style for the editable input field */
+        .editable-name-input {
+            position: absolute;
+            background-color: #333;
+            color: #fff;
+            border: 1px solid #d97706;
+            padding: 2px 5px;
+            font-size: 12px;
+            font-family: 'Inter', sans-serif;
+            border-radius: 4px;
+            z-index: 100; /* Ensure it's above the canvas */
+        }
     </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-amber-950 to-stone-950 text-amber-100 p-4 sm:p-8 flex flex-col items-center">
 
     <h1 class="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-red-600 mb-8 text-center font-cinzel-decorative">
-        Daddy's Dungeon 5e Map Generator
+       Daddy's Dungeon 5e Map Generator
     </h1>
 
     <!-- Mode Selection Buttons -->
@@ -108,7 +121,7 @@
         </div>
 
         <!-- Map Display Section -->
-        <div class="lg:w-2/3 bg-stone-800 p-6 rounded-xl shadow-2xl flex items-center justify-center relative overflow-hidden border border-stone-700">
+        <div id="mapContainer" class="lg:w-2/3 bg-stone-800 p-6 rounded-xl shadow-2xl flex items-center justify-center relative overflow-hidden border border-stone-700">
             <canvas id="mapCanvas" class="border-2 border-gray-700 rounded-lg shadow-lg" style="width: 100%; height: auto;"></canvas>
         </div>
     </div>
@@ -220,10 +233,11 @@
         let generationMode = 'world';
         const perlinNoiseInstance = new PerlinNoise(); // Single instance for re-seeding
 
-        // Initial options - width/height will be dynamically set by resizeCanvas
         let worldMapOptions = {
-            width: 0, // Will be set dynamically
-            height: 0, // Will be set dynamically
+            width: 800,
+            height: 600,
+            prevWidth: 800, // Store previous width for scaling
+            prevHeight: 600, // Store previous height for scaling
             seed: Date.now(),
             scale: 100,
             octaves: 4,
@@ -256,12 +270,15 @@
                 ice: '#ADD8E6',
                 volcano: '#8B0000',
                 mountains: '#A9A9A9',
-            }
+            },
+            showAdventureRoute: false,
+            numRoutePoints: 5,
+            adventureRoute: [],
         };
 
         let dungeonOptions = {
-            width: 0, // Will be set dynamically
-            height: 0, // Will be set dynamically
+            width: 800,
+            height: 600,
             seed: Date.now() + 1,
             numRooms: 10,
             minRoomSize: 20,
@@ -283,11 +300,15 @@
             monsterLairColor: '#4B0082',
             showGrid: true,
             gridColor: 'rgba(255, 255, 255, 0.2)',
+            showAdventureRoute: false,
+            numRoutePoints: 5,
+            adventureRoute: [],
+            rooms: [], // Added to store generated rooms
         };
 
         let castleOptions = {
-            width: 0, // Will be set dynamically
-            height: 0, // Will be set dynamically
+            width: 800,
+            height: 600,
             seed: Date.now() + 2,
             castleSize: 0.7,
             numTowers: 4,
@@ -309,6 +330,9 @@
             trainingGroundColor: '#8B4513',
             showGrid: true,
             gridColor: 'rgba(0, 0, 0, 0.2)',
+            showAdventureRoute: false,
+            numRoutePoints: 5,
+            adventureRoute: [],
         };
 
         // Fixed Watermark Options
@@ -321,45 +345,117 @@
         };
 
         const mapCanvas = document.getElementById('mapCanvas');
+        const mapContainer = document.getElementById('mapContainer'); // Get the container for positioning input field
         const controlsDiv = document.getElementById('controls');
         const explanationBlockDiv = document.getElementById('explanationBlock');
 
-        // Function to resize the canvas dynamically
-        const resizeCanvas = () => {
-            const parentDiv = mapCanvas.parentElement;
-            const aspectRatio = 4 / 3; // Standard map aspect ratio (width / height)
+        // Interaction state variables
+        let isDragging = false;
+        let draggedPointIndex = -1;
+        let offsetX, offsetY; // Offset from mouse to point center for dragging
+        let nameInputEl = null; // Reference to the active input element for editing names
 
-            let newWidth = parentDiv.clientWidth;
-            let newHeight = newWidth / aspectRatio;
+        // --- Name Generation for Adventure Route ---
+        const namePrefixes = ["Black", "Whispering", "Sunken", "Lost", "Dragon's", "Shadow", "Iron", "Silver", "Grim", "Star"];
+        const nameSuffixes = ["Peak", "Forest", "River", "Hold", "Crag", "Dale", "Marsh", "Gorge", "Falls", "Spire"];
+        const nameMiddle = ["", "wood", "water", "stone", "glen", "haven", "ridge", "vale", "cross", "fort"];
 
-            // If the calculated height is too tall for the parent, adjust based on height
-            if (newHeight > parentDiv.clientHeight) {
-                newHeight = parentDiv.clientHeight;
-                newWidth = newHeight * aspectRatio;
-            }
-
-            mapCanvas.width = newWidth;
-            mapCanvas.height = newHeight;
-
-            // Update the current mode's options with the new canvas dimensions
-            if (generationMode === 'world') {
-                worldMapOptions.width = newWidth;
-                worldMapOptions.height = newHeight;
-            } else if (generationMode === 'dungeon') {
-                dungeonOptions.width = newWidth;
-                dungeonOptions.height = newHeight;
-            } else if (generationMode === 'castle') {
-                castleOptions.width = newWidth;
-                castleOptions.height = newHeight;
-            }
-
-            renderMap(); // Redraw map with new dimensions
+        const generateRandomName = (randomFunc) => {
+            const prefix = namePrefixes[Math.floor(randomFunc() * namePrefixes.length)];
+            const suffix = nameSuffixes[Math.floor(randomFunc() * nameSuffixes.length)];
+            const middle = Math.random() < 0.3 ? nameMiddle[Math.floor(randomFunc() * nameMiddle.length)] : '';
+            return `${prefix}${middle ? ' ' + middle : ''} ${suffix}`;
         };
+
+        // Function to generate adventure route points for any map type
+        const generateRoutePoints = (options) => {
+            let s = options.seed; // Use the current map's seed for route generation
+            const random = () => {
+                s = (s * 9301 + 49297) % 233280;
+                return s / 233280;
+            };
+
+            options.adventureRoute = [];
+            const numPoints = options.numRoutePoints;
+
+            if (generationMode === 'dungeon' && options.rooms && options.rooms.length > 0) {
+                // For dungeon, place points only within rooms
+                for (let i = 0; i < numPoints; i++) {
+                    const randomRoom = options.rooms[Math.floor(random() * options.rooms.length)];
+                    const x = randomRoom.x + Math.floor(random() * randomRoom.w);
+                    const y = randomRoom.y + Math.floor(random() * randomRoom.h);
+                    options.adventureRoute.push({ x: x, y: y, name: generateRandomName(random) });
+                }
+            } else {
+                // For other modes or if no rooms in dungeon, place anywhere on map
+                for (let i = 0; i < numPoints; i++) {
+                    const x = Math.floor(random() * options.width);
+                    const y = Math.floor(random() * options.height);
+                    options.adventureRoute.push({ x: x, y: y, name: generateRandomName(random) });
+                }
+            }
+            renderMap();
+        };
+
 
         // --- Map Drawing Functions ---
 
+        // Reusable function to draw the adventure route
+        const drawAdventureRoute = (ctx, options) => {
+            if (options.showAdventureRoute && options.adventureRoute.length > 0) {
+                ctx.strokeStyle = '#FFD700'; // Gold color for route
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]); // Dashed line
+
+                ctx.beginPath();
+                ctx.moveTo(options.adventureRoute[0].x, options.adventureRoute[0].y);
+                for (let i = 1; i < options.adventureRoute.length; i++) {
+                    ctx.lineTo(options.adventureRoute[i].x, options.adventureRoute[i].y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]); // Reset line dash
+
+                ctx.fillStyle = '#FFD700'; // Gold for points
+                ctx.strokeStyle = '#000000'; // Black border for points
+                ctx.lineWidth = 1;
+                ctx.font = '12px "Inter", sans-serif';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+
+                options.adventureRoute.forEach((point, index) => {
+                    ctx.beginPath();
+                    ctx.arc(point.x, point.y, 5, 0, Math.PI * 2); // Draw point
+                    ctx.fill();
+                    ctx.stroke();
+
+                    // Store text bounding box for hit testing
+                    const textX = point.x + 10;
+                    const textY = point.y;
+                    const textMetrics = ctx.measureText(point.name);
+                    const textWidth = textMetrics.width;
+                    const textHeight = 12; // Approximation for font size 12
+
+                    // Store bounding box for click detection
+                    point.textBox = {
+                        x: textX,
+                        y: textY - textHeight / 2, // Adjust y to be centered vertically
+                        width: textWidth,
+                        height: textHeight
+                    };
+
+                    // Draw name with a small offset, only if not in castle mode
+                    if (generationMode !== 'castle') {
+                        ctx.fillStyle = '#FFFFFF'; // White for text
+                        ctx.fillText(point.name, textX, textY);
+                    }
+                });
+            }
+        };
+
         const drawWorldMap = () => {
             const ctx = mapCanvas.getContext('2d');
+            mapCanvas.width = worldMapOptions.width;
+            mapCanvas.height = worldMapOptions.height;
             ctx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
 
             perlinNoiseInstance.seed = worldMapOptions.seed; // Re-seed Perlin noise
@@ -411,11 +507,15 @@
             if (worldMapOptions.showGrid) {
                 drawGrid(ctx, mapCanvas.width, mapCanvas.height, 20, worldMapOptions.gridColor);
             }
+
+            drawAdventureRoute(ctx, worldMapOptions); // Draw route for world map
             drawWatermark(ctx, mapCanvas.width, mapCanvas.height, watermarkOptions.text, watermarkOptions.font, watermarkOptions.size, watermarkOptions.color, watermarkOptions.opacity);
         };
 
         const drawDungeon = () => {
             const ctx = mapCanvas.getContext('2d');
+            mapCanvas.width = dungeonOptions.width;
+            mapCanvas.height = dungeonOptions.height;
             ctx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
             ctx.fillStyle = dungeonOptions.wallColor;
             ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
@@ -460,6 +560,7 @@
                     attempts++;
                 }
             }
+            dungeonOptions.rooms = rooms; // Store generated rooms in options
 
             ctx.fillStyle = dungeonOptions.floorColor;
             rooms.forEach(room => {
@@ -593,11 +694,14 @@
             if (dungeonOptions.showGrid) {
                 drawGrid(ctx, mapCanvas.width, mapCanvas.height, 20, dungeonOptions.gridColor, 0.5);
             }
+            drawAdventureRoute(ctx, dungeonOptions); // Draw route for dungeon map
             drawWatermark(ctx, mapCanvas.width, mapCanvas.height, watermarkOptions.text, watermarkOptions.font, watermarkOptions.size, watermarkOptions.color, watermarkOptions.opacity);
         };
 
         const drawCastle = () => {
             const ctx = mapCanvas.getContext('2d');
+            mapCanvas.width = castleOptions.width;
+            mapCanvas.height = castleOptions.height;
             ctx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
             ctx.fillStyle = castleOptions.courtyardColor;
             ctx.fillRect(0, 0, mapCanvas.width, mapCanvas.height);
@@ -618,71 +722,89 @@
             const wallX = centerX - castleWidth / 2;
             const wallY = centerY - castleHeight / 2;
 
+            // Moat
             if (castleOptions.moatColor) {
                 const moatOffset = castleOptions.wallThickness * 1.5;
                 ctx.fillStyle = castleOptions.moatColor;
                 ctx.fillRect(wallX - moatOffset, wallY - moatOffset, castleWidth + 2 * moatOffset, castleHeight + 2 * moatOffset);
             }
 
+            // Outer Walls
             ctx.fillStyle = castleOptions.wallColor;
-            ctx.fillRect(wallX, wallY, castleWidth, castleOptions.wallThickness);
-            ctx.fillRect(wallX, wallY + castleHeight - castleOptions.wallThickness, castleWidth, castleOptions.wallThickness);
-            ctx.fillRect(wallX, wallY + castleOptions.wallThickness, castleOptions.wallThickness, castleHeight - 2 * castleOptions.wallThickness);
-            ctx.fillRect(wallX + castleWidth - castleOptions.wallThickness, wallY + castleOptions.wallThickness, castleOptions.wallThickness, castleHeight - 2 * castleOptions.wallThickness);
+            ctx.fillRect(wallX, wallY, castleWidth, castleOptions.wallThickness); // Top
+            ctx.fillRect(wallX, wallY + castleHeight - castleOptions.wallThickness, castleWidth, castleOptions.wallThickness); // Bottom
+            ctx.fillRect(wallX, wallY + castleOptions.wallThickness, castleOptions.wallThickness, castleHeight - 2 * castleOptions.wallThickness); // Left
+            ctx.fillRect(wallX + castleWidth - castleOptions.wallThickness, wallY + castleOptions.wallThickness, castleOptions.wallThickness, castleHeight - 2 * castleOptions.wallThickness); // Right
 
+            // Crenellations
             const crenelationSize = castleOptions.wallThickness / 2;
             const crenelationGap = castleOptions.wallThickness / 2;
 
+            // Top wall crenellations
             for (let x = wallX; x < wallX + castleWidth - crenelationSize; x += (crenelationSize + crenelationGap)) {
                 ctx.fillRect(x, wallY - crenelationSize, crenelationSize, crenelationSize);
             }
+            // Bottom wall crenellations
             for (let x = wallX; x < wallX + castleWidth - crenelationSize; x += (crenelationSize + crenelationGap)) {
                 ctx.fillRect(x, wallY + castleHeight, crenelationSize, crenelationSize);
             }
+            // Left wall crenellations
             for (let y = wallY; y < wallY + castleHeight - crenelationSize; y += (crenelationSize + crenelationGap)) {
                 ctx.fillRect(wallX - crenelationSize, y, crenelationSize, crenelationSize);
             }
+            // Right wall crenellations
             for (let y = wallY; y < wallY + castleHeight - crenelationSize; y += (crenelationSize + crenelationGap)) {
                 ctx.fillRect(wallX + castleWidth, y, crenelationSize, crenelationSize);
             }
 
+
+            // Towers
             ctx.fillStyle = castleOptions.roofColor;
             const towerSize = castleOptions.wallThickness * 2;
             const cornerOffset = castleOptions.wallThickness / 2;
 
-            ctx.fillRect(wallX - cornerOffset, wallY - cornerOffset, towerSize, towerSize);
-            ctx.fillRect(wallX + castleWidth - towerSize + cornerOffset, wallY - cornerOffset, towerSize, towerSize);
-            ctx.fillRect(wallX - cornerOffset, wallY + castleHeight - towerSize + cornerOffset, towerSize, towerSize);
-            ctx.fillRect(wallX + castleWidth - towerSize + cornerOffset, wallY + castleHeight - towerSize + cornerOffset, towerSize, towerSize);
+            // Corner towers
+            ctx.fillRect(wallX - cornerOffset, wallY - cornerOffset, towerSize, towerSize); // Top-left
+            ctx.fillRect(wallX + castleWidth - towerSize + cornerOffset, wallY - cornerOffset, towerSize, towerSize); // Top-right
+            ctx.fillRect(wallX - cornerOffset, wallY + castleHeight - towerSize + cornerOffset, towerSize, towerSize); // Bottom-left
+            ctx.fillRect(wallX + castleWidth - towerSize + cornerOffset, wallY + castleHeight - towerSize + cornerOffset, towerSize, towerSize); // Bottom-right
 
+            // Additional towers
             if (castleOptions.numTowers > 4) {
                 const numAdditionalTowers = castleOptions.numTowers - 4;
                 const perimeterPoints = [];
 
+                // Points along top wall (excluding corners)
                 for (let x = wallX + towerSize; x < wallX + castleWidth - towerSize; x += (towerSize + castleOptions.wallThickness * 2)) {
                     perimeterPoints.push({ x: x, y: wallY - cornerOffset });
                 }
+                // Points along right wall (excluding corners)
                 for (let y = wallY + towerSize; y < wallY + castleHeight - towerSize; y += (towerSize + castleOptions.wallThickness * 2)) {
                     perimeterPoints.push({ x: wallX + castleWidth - towerSize + cornerOffset, y: y });
                 }
+                // Points along bottom wall (excluding corners)
                 for (let x = wallX + castleWidth - towerSize; x > wallX + towerSize; x -= (towerSize + castleOptions.wallThickness * 2)) {
                     perimeterPoints.push({ x: x, y: wallY + castleHeight - towerSize + cornerOffset });
                 }
+                // Points along left wall (excluding corners)
                 for (let y = wallY + castleHeight - towerSize; y > wallY + towerSize; y -= (towerSize + castleOptions.wallThickness * 2)) {
                     perimeterPoints.push({ x: wallX - cornerOffset, y: y });
                 }
 
+                // Shuffle perimeter points to randomize additional tower placement
                 for (let i = perimeterPoints.length - 1; i > 0; i--) {
                     const j = Math.floor(random() * (i + 1));
                     [perimeterPoints[i], perimeterPoints[j]] = [perimeterPoints[j], perimeterPoints[i]];
                 }
 
+                // Draw additional towers
                 for (let i = 0; i < numAdditionalTowers && i < perimeterPoints.length; i++) {
                     const p = perimeterPoints[i];
                     ctx.fillRect(p.x, p.y, towerSize, towerSize);
                 }
             }
 
+            // Central Keep
             ctx.fillStyle = castleOptions.keepColor;
             const keepWidth = castleWidth * 0.4;
             const keepHeight = castleHeight * 0.4;
@@ -690,16 +812,19 @@
             const keepY = centerY - keepHeight / 2;
             ctx.fillRect(keepX, keepY, keepWidth, keepHeight);
 
+            // Throne in Keep
             ctx.fillStyle = castleOptions.throneColor;
             const throneSize = Math.min(keepWidth, keepHeight) * 0.2;
             ctx.fillRect(keepX + keepWidth / 2 - throneSize / 2, keepY + keepHeight * 0.7, throneSize, throneSize);
 
+            // Inner Area for other buildings
             const innerAreaX = wallX + castleOptions.wallThickness;
             const innerAreaY = wallY + castleOptions.wallThickness;
             const innerAreaWidth = castleWidth - 2 * castleOptions.wallThickness;
             const innerAreaHeight = castleHeight - 2 * castleOptions.wallThickness;
 
-            const numInnerBuildings = Math.floor(random() * 3) + 1;
+            // Inner Buildings
+            const numInnerBuildings = Math.floor(random() * 3) + 1; // 1 to 3 additional inner buildings
             for (let i = 0; i < numInnerBuildings; i++) {
                 const buildingType = Math.floor(random() * 4); // 0: general, 1: barracks, 2: kitchen, 3: storeroom
                 let currentBuildingColor = castleOptions.innerBuildingColor;
@@ -720,32 +845,35 @@
                 ctx.fillStyle = currentBuildingColor;
                 ctx.fillRect(buildingX, buildingY, buildingWidth, buildingHeight);
 
-                const numItems = Math.floor(random() * 3);
+                // Add some internal features to buildings
+                const numItems = Math.floor(random() * 3); // 0 to 2 items per building
                 for (let j = 0; j < numItems; j++) {
-                    const itemType = Math.floor(random() * 2);
-                    const itemSize = Math.floor(random() * 8) + 5;
+                    const itemType = Math.floor(random() * 2); // 0: weapon rack, 1: furniture
+                    const itemSize = Math.floor(random() * 8) + 5; // Small random size
                     const itemX = buildingX + Math.floor(random() * (buildingWidth - itemSize));
                     const itemY = buildingY + Math.floor(random() * (buildingHeight - itemSize));
 
-                    if (itemType === 0) {
+                    if (itemType === 0) { // Weapon Rack
                         ctx.fillStyle = castleOptions.weaponRackColor;
-                        ctx.fillRect(itemX, itemY, itemSize, itemSize * 2);
-                        ctx.fillRect(itemX, itemY + itemSize, itemSize * 2, itemSize / 4);
-                    } else {
+                        ctx.fillRect(itemX, itemY, itemSize, itemSize * 2); // Vertical part
+                        ctx.fillRect(itemX, itemY + itemSize, itemSize * 2, itemSize / 4); // Horizontal arm
+                    } else { // Furniture (e.g., table)
                         ctx.fillStyle = castleOptions.furnitureColor;
                         ctx.fillRect(itemX, itemY, itemSize * 1.5, itemSize);
                     }
                 }
             }
 
-            if (random() < 0.5 && castleOptions.gardenColor) {
-                const gardenSize = Math.min(innerAreaWidth, innerAreaHeight) * (0.1 + random() * 0.2);
+            // Garden
+            if (random() < 0.5 && castleOptions.gardenColor) { // 50% chance to draw a garden
+                const gardenSize = Math.min(innerAreaWidth, innerAreaHeight) * (0.1 + random() * 0.2); // 10-30% of inner area
                 const gardenX = innerAreaX + Math.floor(random() * (innerAreaWidth - gardenSize));
                 const gardenY = innerAreaY + Math.floor(random() * (innerAreaHeight - gardenSize));
                 ctx.fillStyle = castleOptions.gardenColor;
                 ctx.fillRect(gardenX, gardenY, gardenSize, gardenSize);
             }
-            if (random() < 0.5 && castleOptions.trainingGroundColor) {
+            // Training Ground
+            if (random() < 0.5 && castleOptions.trainingGroundColor) { // 50% chance to draw a training ground
                 const tgSize = Math.min(innerAreaWidth, innerAreaHeight) * (0.1 + random() * 0.2);
                 const tgX = innerAreaX + Math.floor(random() * (innerAreaWidth - tgSize));
                 const tgY = innerAreaY + Math.floor(random() * (innerAreaHeight - tgSize));
@@ -753,19 +881,25 @@
                 ctx.fillRect(tgX, tgY, tgSize, tgSize);
                 ctx.strokeStyle = castleOptions.wallColor;
                 ctx.lineWidth = 1;
-                ctx.strokeRect(tgX, tgY, tgSize, tgSize);
+                ctx.strokeRect(tgX, tgY, tgSize, tgSize); // Outline for training ground
             }
 
+
+            // Gatehouse
             ctx.fillStyle = castleOptions.gateColor;
             const gateWidth = castleOptions.wallThickness * 4;
             const gateHeight = castleOptions.wallThickness * 3;
+            // Draw gatehouse structure
             ctx.fillRect(centerX - gateWidth / 2, wallY - gateHeight + castleOptions.wallThickness, gateWidth, gateHeight);
-            ctx.fillStyle = castleOptions.courtyardColor;
+            // Draw opening/path through gate
+            ctx.fillStyle = castleOptions.courtyardColor; // Use courtyard color for the path
             ctx.fillRect(centerX - (gateWidth / 2) + castleOptions.wallThickness, wallY + castleOptions.wallThickness, gateWidth - 2 * castleOptions.wallThickness, castleOptions.wallThickness);
+
 
             if (castleOptions.showGrid) {
                 drawGrid(ctx, mapCanvas.width, mapCanvas.height, 20, castleOptions.gridColor, 0.5);
             }
+            drawAdventureRoute(ctx, castleOptions); // Draw route for castle map
             drawWatermark(ctx, mapCanvas.width, mapCanvas.height, watermarkOptions.text, watermarkOptions.font, watermarkOptions.size, watermarkOptions.color, watermarkOptions.opacity);
         };
 
@@ -776,11 +910,11 @@
                 <h2 class="text-2xl font-bold text-amber-100 mb-4">World Map Options</h2>
                 <div class="flex flex-col">
                     <label for="worldWidth" class="text-stone-300 mb-1">Width:</label>
-                    <input type="number" id="worldWidth" name="width" value="${mapCanvas.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                    <input type="number" id="worldWidth" name="width" value="${worldMapOptions.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" />
                 </div>
                 <div class="flex flex-col">
                     <label for="worldHeight" class="text-stone-300 mb-1">Height:</label>
-                    <input type="number" id="worldHeight" name="height" value="${mapCanvas.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                    <input type="number" id="worldHeight" name="height" value="${worldMapOptions.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" />
                 </div>
                 <div class="flex flex-col">
                     <label for="worldScale" class="text-stone-300 mb-1">Detail Scale (<span id="worldScaleValue">${worldMapOptions.scale.toFixed(0)}</span>):</label>
@@ -812,7 +946,7 @@
                     <div class="flex items-center">
                         <label for="biomeColors.${key}" class="text-stone-300 mr-2 capitalize">${key.replace(/([A-Z])/g, ' $1')}:</label>
                         <input type="color" id="biomeColors.${key}" name="biomeColors.${key}" value="${worldMapOptions.biomeColors[key]}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${worldMapOptions.biomeColors[key]}" data-name="biomeColors.${key}" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="biomeColorsText.${key}" value="${worldMapOptions.biomeColors[key]}" data-name="biomeColors.${key}" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 `).join('')}
 
@@ -828,9 +962,21 @@
                     <label for="worldGridColor" class="text-stone-300 mb-1">Grid Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="worldGridColor" name="gridColor" value="${worldMapOptions.gridColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${worldMapOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="worldGridColorText" value="${worldMapOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
+
+                <h3 class="text-xl font-bold text-amber-100 mt-4 mb-2">Adventure Route</h3>
+                <div class="flex items-center">
+                    <input type="checkbox" id="showAdventureRoute" name="showAdventureRoute" ${worldMapOptions.showAdventureRoute ? 'checked' : ''} class="form-checkbox h-5 w-5 text-amber-500 rounded border-stone-600 bg-stone-700 focus:ring-amber-500" />
+                    <label for="showAdventureRoute" class="ml-2 text-stone-300">Show Route</label>
+                </div>
+                <div class="flex flex-col">
+                    <label for="numRoutePoints" class="text-stone-300 mb-1">Number of Route Points (<span id="numRoutePointsValue">${worldMapOptions.numRoutePoints}</span>):</label>
+                    <input type="range" id="numRoutePoints" name="numRoutePoints" min="2" max="50" step="1" value="${worldMapOptions.numRoutePoints}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <button id="generateAdventureRouteBtn" class="px-4 py-2 bg-purple-800 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105">Generate New Route</button>
+
                 <button id="exportMapBtn" class="mt-6 w-full py-3 bg-green-700 hover:bg-green-600 text-white font-bold text-lg rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
                     Export Map as PNG
                 </button>
@@ -840,30 +986,82 @@
             controlsDiv.querySelectorAll('input').forEach(input => {
                 input.addEventListener('input', (e) => {
                     const name = e.target.name || e.target.dataset.name;
-                    const value = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' || e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value);
+                    let value;
 
-                    if (name.startsWith('biomeColors.')) {
+                    if (e.target.type === 'checkbox') {
+                        value = e.target.checked;
+                    } else if (e.target.type === 'number' || e.target.type === 'range') {
+                        value = parseFloat(e.target.value);
+                    } else { // For text inputs (color hex codes)
+                        value = e.target.value;
+                    }
+
+                    // Handle width/height changes with scaling
+                    if (name === 'width') {
+                        const oldWidth = worldMapOptions.width;
+                        worldMapOptions.width = value;
+                        const scaleFactorX = worldMapOptions.width / oldWidth;
+                        worldMapOptions.adventureRoute.forEach(p => p.x *= scaleFactorX);
+                        worldMapOptions.prevWidth = worldMapOptions.width; // Update prev width
+                    } else if (name === 'height') {
+                        const oldHeight = worldMapOptions.height;
+                        worldMapOptions.height = value;
+                        const scaleFactorY = worldMapOptions.height / oldHeight;
+                        worldMapOptions.adventureRoute.forEach(p => p.y *= scaleFactorY);
+                        worldMapOptions.prevHeight = worldMapOptions.height; // Update prev height
+                    } else if (name.startsWith('biomeColors.')) {
                         const colorKey = name.split('.')[1];
                         worldMapOptions.biomeColors[colorKey] = value;
+                        // Update associated text input
+                        const textInput = document.getElementById(`biomeColorsText.${colorKey}`);
+                        if (textInput) textInput.value = value;
+                    } else if (name.startsWith('biomeColorsText.')) { // Handle text input for color
+                        const colorKey = name.split('.')[1];
+                        worldMapOptions.biomeColors[colorKey] = value;
+                        // Update associated color picker
+                        const colorInput = document.getElementById(`biomeColors.${colorKey}`);
+                        if (colorInput) colorInput.value = value;
                     } else if (name.startsWith('biomeThresholds.')) {
                         const thresholdKey = name.split('.')[1];
                         worldMapOptions.biomeThresholds[thresholdKey] = value;
                         document.getElementById(`biomeThresholds.${thresholdKey}Value`).textContent = value.toFixed(2);
+                    } else if (name === 'gridColor') {
+                        worldMapOptions.gridColor = value;
+                        const textInput = document.getElementById('worldGridColorText');
+                        if (textInput) textInput.value = value;
+                    } else if (name === 'gridColorText') {
+                        worldMapOptions.gridColor = value;
+                        const colorInput = document.getElementById('worldGridColor');
+                        if (colorInput) colorInput.value = value;
                     } else {
                         worldMapOptions[name] = value;
                     }
 
+                    // Update range slider value displays
                     if (e.target.type === 'range') {
-                        document.getElementById(`${e.target.id}Value`).textContent = value.toFixed(e.target.id.includes('persistence') || e.target.id.includes('lacunarity') ? 1 : 0);
+                        let displayValue = value;
+                        if (e.target.id.includes('persistence')) {
+                            displayValue = value.toFixed(2);
+                        } else if (e.target.id.includes('lacunarity') || e.target.id.includes('Size')) {
+                            displayValue = value.toFixed(1);
+                        } else {
+                            displayValue = value.toFixed(0); // For integers
+                        }
+                        const valueSpan = document.getElementById(`${e.target.id}Value`);
+                        if (valueSpan) {
+                            valueSpan.textContent = displayValue;
+                        }
                     }
                     renderMap();
                 });
             });
+
             document.getElementById('newWorldSeedBtn').addEventListener('click', () => {
                 worldMapOptions.seed = Date.now();
                 document.getElementById('worldSeedValue').textContent = worldMapOptions.seed;
                 renderMap();
             });
+            document.getElementById('generateAdventureRouteBtn').addEventListener('click', () => generateRoutePoints(worldMapOptions));
             document.getElementById('exportMapBtn').addEventListener('click', exportMap);
         };
 
@@ -872,11 +1070,11 @@
                 <h2 class="text-2xl font-bold text-amber-100 mb-4">Dungeon Options</h2>
                 <div class="flex flex-col">
                     <label for="dungeonWidth" class="text-stone-300 mb-1">Width:</label>
-                    <input type="number" id="dungeonWidth" name="width" value="${mapCanvas.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                    <input type="number" id="dungeonWidth" name="width" value="${dungeonOptions.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" />
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonHeight" class="text-stone-300 mb-1">Height:</label>
-                    <input type="number" id="dungeonHeight" name="height" value="${mapCanvas.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                    <input type="number" id="dungeonHeight" name="height" value="${dungeonOptions.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" />
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonNumRooms" class="text-stone-300 mb-1">Number of Rooms (<span id="dungeonNumRoomsValue">${dungeonOptions.numRooms}</span>):</label>
@@ -898,98 +1096,98 @@
                     <label for="dungeonWallColor" class="text-stone-300 mb-1">Wall Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonWallColor" name="wallColor" value="${dungeonOptions.wallColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.wallColor}" data-name="wallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonWallColorText" value="${dungeonOptions.wallColor}" data-name="wallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonFloorColor" class="text-stone-300 mb-1">Floor Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonFloorColor" name="floorColor" value="${dungeonOptions.floorColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.floorColor}" data-name="floorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonFloorColorText" value="${dungeonOptions.floorColor}" data-name="floorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonDoorColor" class="text-stone-300 mb-1">Door Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonDoorColor" name="doorColor" value="${dungeonOptions.doorColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.doorColor}" data-name="doorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonDoorColorText" value="${dungeonOptions.doorColor}" data-name="doorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonPillarColor" class="text-stone-300 mb-1">Pillar Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonPillarColor" name="pillarColor" value="${dungeonOptions.pillarColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.pillarColor}" data-name="pillarColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonPillarColorText" value="${dungeonOptions.pillarColor}" data-name="pillarColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonStairsColor" class="text-stone-300 mb-1">Stairs Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonStairsColor" name="stairsColor" value="${dungeonOptions.stairsColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.stairsColor}" data-name="stairsColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonStairsColorText" value="${dungeonOptions.stairsColor}" data-name="stairsColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonPitColor" class="text-stone-300 mb-1">Pit Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonPitColor" name="pitColor" value="${dungeonOptions.pitColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.pitColor}" data-name="pitColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonPitColorText" value="${dungeonOptions.pitColor}" data-name="pitColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonChestColor" class="text-stone-300 mb-1">Chest Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonChestColor" name="chestColor" value="${dungeonOptions.chestColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.chestColor}" data-name="chestColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonChestColorText" value="${dungeonOptions.chestColor}" data-name="chestColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonTrapColor" class="text-stone-300 mb-1">Trap Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonTrapColor" name="trapColor" value="${dungeonOptions.trapColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.trapColor}" data-name="trapColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonTrapColorText" value="${dungeonOptions.trapColor}" data-name="trapColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonAltarColor" class="text-stone-300 mb-1">Altar Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonAltarColor" name="altarColor" value="${dungeonOptions.altarColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.altarColor}" data-name="altarColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonAltarColorText" value="${dungeonOptions.altarColor}" data-name="altarColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonBrazierColor" class="text-stone-300 mb-1">Brazier Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonBrazierColor" name="brazierColor" value="${dungeonOptions.brazierColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.brazierColor}" data-name="brazierColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonBrazierColorText" value="${dungeonOptions.brazierColor}" data-name="brazierColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonBrokenWallColor" class="text-stone-300 mb-1">Broken Wall Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonBrokenWallColor" name="brokenWallColor" value="${dungeonOptions.brokenWallColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.brokenWallColor}" data-name="brokenWallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonBrokenWallColorText" value="${dungeonOptions.brokenWallColor}" data-name="brokenWallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonSecretDoorColor" class="text-stone-300 mb-1">Secret Door Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonSecretDoorColor" name="secretDoorColor" value="${dungeonOptions.secretDoorColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.secretDoorColor}" data-name="secretDoorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonSecretDoorColorText" value="${dungeonOptions.secretDoorColor}" data-name="secretDoorColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonTreasurePileColor" class="text-stone-300 mb-1">Treasure Pile Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonTreasurePileColor" name="treasurePileColor" value="${dungeonOptions.treasurePileColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.treasurePileColor}" data-name="treasurePileColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonTreasurePileColorText" value="${dungeonOptions.treasurePileColor}" data-name="treasurePileColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="dungeonMonsterLairColor" class="text-stone-300 mb-1">Monster Lair Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonMonsterLairColor" name="monsterLairColor" value="${dungeonOptions.monsterLairColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.monsterLairColor}" data-name="monsterLairColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonMonsterLairColorText" value="${dungeonOptions.monsterLairColor}" data-name="monsterLairColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex items-center justify-between">
@@ -1004,9 +1202,19 @@
                     <label for="dungeonGridColor" class="text-stone-300 mb-1">Grid Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="dungeonGridColor" name="gridColor" value="${dungeonOptions.gridColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${dungeonOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="dungeonGridColorText" value="${dungeonOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
+                <h3 class="text-xl font-bold text-amber-100 mt-4 mb-2">Adventure Route</h3>
+                <div class="flex items-center">
+                    <input type="checkbox" id="dungeonShowAdventureRoute" name="showAdventureRoute" ${dungeonOptions.showAdventureRoute ? 'checked' : ''} class="form-checkbox h-5 w-5 text-amber-500 rounded border-stone-600 bg-stone-700 focus:ring-amber-500" />
+                    <label for="dungeonShowAdventureRoute" class="ml-2 text-stone-300">Show Route</label>
+                </div>
+                <div class="flex flex-col">
+                    <label for="dungeonNumRoutePoints" class="text-stone-300 mb-1">Number of Route Points (<span id="dungeonNumRoutePointsValue">${dungeonOptions.numRoutePoints}</span>):</label>
+                    <input type="range" id="dungeonNumRoutePoints" name="numRoutePoints" min="2" max="50" step="1" value="${dungeonOptions.numRoutePoints}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <button id="generateDungeonAdventureRouteBtn" class="px-4 py-2 bg-purple-800 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105">Generate New Route</button>
                 <button id="exportMapBtn" class="mt-6 w-full py-3 bg-green-700 hover:bg-green-600 text-white font-bold text-lg rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
                     Export Map as PNG
                 </button>
@@ -1015,10 +1223,33 @@
             controlsDiv.querySelectorAll('input').forEach(input => {
                 input.addEventListener('input', (e) => {
                     const name = e.target.name || e.target.dataset.name;
-                    const value = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' || e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value);
-                    dungeonOptions[name] = value;
+                    let value;
+
+                    if (e.target.type === 'checkbox') {
+                        value = e.target.checked;
+                    } else if (e.target.type === 'number' || e.target.type === 'range') {
+                        value = parseFloat(e.target.value);
+                    } else { // For text inputs (color hex codes)
+                        value = e.target.value;
+                    }
+
+                    if (name.includes('Color')) { // Generic check for color inputs
+                        const baseName = name.replace('Text', ''); // Remove 'Text' suffix if present
+                        dungeonOptions[baseName] = value;
+                        // Update associated input (color picker or text field)
+                        const colorInput = document.getElementById(`dungeon${baseName.charAt(0).toUpperCase() + baseName.slice(1)}`);
+                        const textInput = document.getElementById(`dungeon${baseName.charAt(0).toUpperCase() + baseName.slice(1)}Text`);
+                        if (colorInput && e.target.type !== 'color') colorInput.value = value;
+                        if (textInput && e.target.type !== 'text') textInput.value = value;
+                    } else {
+                        dungeonOptions[name] = value;
+                    }
+
                     if (e.target.type === 'range') {
-                        document.getElementById(`${e.target.id}Value`).textContent = value;
+                        const valueSpan = document.getElementById(`${e.target.id}Value`);
+                        if (valueSpan) {
+                            valueSpan.textContent = value.toFixed(0); // All dungeon ranges are integers
+                        }
                     }
                     renderMap();
                 });
@@ -1028,6 +1259,7 @@
                 document.getElementById('dungeonSeedValue').textContent = dungeonOptions.seed;
                 renderMap();
             });
+            document.getElementById('generateDungeonAdventureRouteBtn').addEventListener('click', () => generateRoutePoints(dungeonOptions));
             document.getElementById('exportMapBtn').addEventListener('click', exportMap);
         };
 
@@ -1036,11 +1268,11 @@
                 <h2 class="text-2xl font-bold text-amber-100 mb-4">Castle Options</h2>
                 <div class="flex flex-col">
                     <label for="castleWidth" class="text-stone-300 mb-1">Width:</label>
-                    <input type="number" id="castleWidth" name="width" value="${mapCanvas.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                    <input type="number" id="castleWidth" name="width" value="${castleOptions.width}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" />
                 </div>
                 <div class="flex flex-col">
                     <label for="castleHeight" class="text-stone-300 mb-1">Height:</label>
-                    <input type="number" id="castleHeight" name="height" value="${mapCanvas.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" readonly />
+                    <input type="number" id="castleHeight" name="height" value="${castleOptions.height}" class="p-2 rounded-md bg-stone-700 border border-stone-600 focus:border-amber-400 focus:ring focus:ring-amber-400 focus:ring-opacity-50 text-amber-100" />
                 </div>
                 <div class="flex flex-col">
                     <label for="castleSize" class="text-stone-300 mb-1">Castle Size (<span id="castleSizeValue">${castleOptions.castleSize.toFixed(2)}</span>):</label>
@@ -1058,105 +1290,105 @@
                     <label for="castleWallColor" class="text-stone-300 mb-1">Wall Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleWallColor" name="wallColor" value="${castleOptions.wallColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.wallColor}" data-name="wallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleWallColorText" value="${castleOptions.wallColor}" data-name="wallColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleRoofColor" class="text-stone-300 mb-1">Roof Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleRoofColor" name="roofColor" value="${castleOptions.roofColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.roofColor}" data-name="roofColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleRoofColorText" value="${castleOptions.roofColor}" data-name="roofColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleCourtyardColor" class="text-stone-300 mb-1">Courtyard Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleCourtyardColor" name="courtyardColor" value="${castleOptions.courtyardColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.courtyardColor}" data-name="courtyardColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleCourtyardColorText" value="${castleOptions.courtyardColor}" data-name="courtyardColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleKeepColor" class="text-stone-300 mb-1">Keep Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleKeepColor" name="keepColor" value="${castleOptions.keepColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.keepColor}" data-name="keepColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleKeepColorText" value="${castleOptions.keepColor}" data-name="keepColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleGateColor" class="text-stone-300 mb-1">Gate Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleGateColor" name="gateColor" value="${castleOptions.gateColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.gateColor}" data-name="gateColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleGateColorText" value="${castleOptions.gateColor}" data-name="gateColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleMoatColor" class="text-stone-300 mb-1">Moat Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleMoatColor" name="moatColor" value="${castleOptions.moatColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.moatColor}" data-name="moatColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleMoatColorText" value="${castleOptions.moatColor}" data-name="moatColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleInnerBuildingColor" class="text-stone-300 mb-1">Inner Building Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleInnerBuildingColor" name="innerBuildingColor" value="${castleOptions.innerBuildingColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.innerBuildingColor}" data-name="innerBuildingColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleInnerBuildingColorText" value="${castleOptions.innerBuildingColor}" data-name="innerBuildingColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleThroneColor" class="text-stone-300 mb-1">Throne Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleThroneColor" name="throneColor" value="${castleOptions.throneColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.throneColor}" data-name="throneColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleThroneColorText" value="${castleOptions.throneColor}" data-name="throneColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleWeaponRackColor" class="text-stone-300 mb-1">Weapon Rack Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleWeaponRackColor" name="weaponRackColor" value="${castleOptions.weaponRackColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.weaponRackColor}" data-name="weaponRackColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleWeaponRackColorText" value="${castleOptions.weaponRackColor}" data-name="weaponRackColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleFurnitureColor" class="text-stone-300 mb-1">Furniture Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleFurnitureColor" name="furnitureColor" value="${castleOptions.furnitureColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.furnitureColor}" data-name="furnitureColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleFurnitureColorText" value="${castleOptions.furnitureColor}" data-name="furnitureColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleBarracksColor" class="text-stone-300 mb-1">Barracks Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleBarracksColor" name="barracksColor" value="${castleOptions.barracksColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.barracksColor}" data-name="barracksColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleBarracksColorText" value="${castleOptions.barracksColor}" data-name="barracksColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleKitchenColor" class="text-stone-300 mb-1">Kitchen Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleKitchenColor" name="kitchenColor" value="${castleOptions.kitchenColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.kitchenColor}" data-name="kitchenColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleKitchenColorText" value="${castleOptions.kitchenColor}" data-name="kitchenColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleStoreroomColor" class="text-stone-300 mb-1">Storeroom Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleStoreroomColor" name="storeroomColor" value="${castleOptions.storeroomColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.storeroomColor}" data-name="storeroomColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleStoreroomColorText" value="${castleOptions.storeroomColor}" data-name="storeroomColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleGardenColor" class="text-stone-300 mb-1">Garden Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleGardenColor" name="gardenColor" value="${castleOptions.gardenColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.gardenColor}" data-name="gardenColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleGardenColorText" value="${castleOptions.gardenColor}" data-name="gardenColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex flex-col">
                     <label for="castleTrainingGroundColor" class="text-stone-300 mb-1">Training Ground Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleTrainingGroundColor" name="trainingGroundColor" value="${castleOptions.trainingGroundColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.trainingGroundColor}" data-name="trainingGroundColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleTrainingGroundColorText" value="${castleOptions.trainingGroundColor}" data-name="trainingGroundColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
                 <div class="flex items-center justify-between">
@@ -1171,9 +1403,19 @@
                     <label for="castleGridColor" class="text-stone-300 mb-1">Grid Color:</label>
                     <div class="flex items-center">
                         <input type="color" id="castleGridColor" name="gridColor" value="${castleOptions.gridColor}" class="w-10 h-10 rounded-md cursor-pointer border border-stone-600" />
-                        <input type="text" value="${castleOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
+                        <input type="text" id="castleGridColorText" value="${castleOptions.gridColor}" data-name="gridColor" class="ml-2 p-1 rounded-md bg-stone-700 border border-stone-600 text-amber-100 w-24" />
                     </div>
                 </div>
+                <h3 class="text-xl font-bold text-amber-100 mt-4 mb-2">Adventure Route</h3>
+                <div class="flex items-center">
+                    <input type="checkbox" id="castleShowAdventureRoute" name="showAdventureRoute" ${castleOptions.showAdventureRoute ? 'checked' : ''} class="form-checkbox h-5 w-5 text-amber-500 rounded border-stone-600 bg-stone-700 focus:ring-amber-500" />
+                    <label for="castleShowAdventureRoute" class="ml-2 text-stone-300">Show Route</label>
+                </div>
+                <div class="flex flex-col">
+                    <label for="castleNumRoutePoints" class="text-stone-300 mb-1">Number of Route Points (<span id="castleNumRoutePointsValue">${castleOptions.numRoutePoints}</span>):</label>
+                    <input type="range" id="castleNumRoutePoints" name="numRoutePoints" min="2" max="50" step="1" value="${castleOptions.numRoutePoints}" class="w-full h-2 bg-stone-700 rounded-lg appearance-none cursor-pointer range-lg accent-amber-600" />
+                </div>
+                <button id="generateCastleAdventureRouteBtn" class="px-4 py-2 bg-purple-800 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105">Generate New Route</button>
                 <button id="exportMapBtn" class="mt-6 w-full py-3 bg-green-700 hover:bg-green-600 text-white font-bold text-lg rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105">
                     Export Map as PNG
                 </button>
@@ -1182,10 +1424,33 @@
             controlsDiv.querySelectorAll('input').forEach(input => {
                 input.addEventListener('input', (e) => {
                     const name = e.target.name || e.target.dataset.name;
-                    const value = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' || e.target.type === 'range' ? parseFloat(e.target.value) : e.target.value);
-                    castleOptions[name] = value;
+                    let value;
+
+                    if (e.target.type === 'checkbox') {
+                        value = e.target.checked;
+                    } else if (e.target.type === 'number' || e.target.type === 'range') {
+                        value = parseFloat(e.target.value);
+                    } else { // For text inputs (color hex codes)
+                        value = e.target.value;
+                    }
+
+                    if (name.includes('Color')) { // Generic check for color inputs
+                        const baseName = name.replace('Text', ''); // Remove 'Text' suffix if present
+                        castleOptions[baseName] = value;
+                        // Update associated input (color picker or text field)
+                        const colorInput = document.getElementById(`castle${baseName.charAt(0).toUpperCase() + baseName.slice(1)}`);
+                        const textInput = document.getElementById(`castle${baseName.charAt(0).toUpperCase() + baseName.slice(1)}Text`);
+                        if (colorInput && e.target.type !== 'color') colorInput.value = value;
+                        if (textInput && e.target.type !== 'text') textInput.value = value;
+                    } else {
+                        castleOptions[name] = value;
+                    }
+
                     if (e.target.type === 'range') {
-                        document.getElementById(`${e.target.id}Value`).textContent = value.toFixed(e.target.id.includes('Size') ? 2 : 0);
+                        const valueSpan = document.getElementById(`${e.target.id}Value`);
+                        if (valueSpan) {
+                            valueSpan.textContent = value.toFixed(e.target.id.includes('Size') ? 2 : 0);
+                        }
                     }
                     renderMap();
                 });
@@ -1195,6 +1460,7 @@
                 document.getElementById('castleSeedValue').textContent = castleOptions.seed;
                 renderMap();
             });
+            document.getElementById('generateCastleAdventureRouteBtn').addEventListener('click', () => generateRoutePoints(castleOptions));
             document.getElementById('exportMapBtn').addEventListener('click', exportMap);
         };
 
@@ -1213,6 +1479,14 @@
                         <div class="flex items-center">
                             <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${worldMapOptions.gridColor};"></div>
                             <span class="text-stone-300 capitalize">Grid Lines</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: #FFD700;"></div>
+                            <span class="text-stone-300 capitalize">Adventure Route Point</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: transparent; border: 2px dashed #FFD700;"></div>
+                            <span class="text-stone-300 capitalize">Adventure Route Path</span>
                         </div>
                     </div>
                 `;
@@ -1279,6 +1553,14 @@
                         <div class="flex items-center">
                             <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${dungeonOptions.gridColor};"></div>
                             <span class="text-stone-300">Grid Lines</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: #FFD700;"></div>
+                            <span class="text-stone-300 capitalize">Adventure Route Point</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: transparent; border: 2px dashed #FFD700;"></div>
+                            <span class="text-stone-300 capitalize">Adventure Route Path</span>
                         </div>
                     </div>
                 `;
@@ -1350,6 +1632,14 @@
                             <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: ${castleOptions.gridColor};"></div>
                             <span class="text-stone-300">Grid Lines</span>
                         </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: #FFD700;"></div>
+                            <span class="text-stone-300 capitalize">Adventure Route Point</span>
+                        </div>
+                        <div class="flex items-center">
+                            <div class="w-6 h-6 rounded-full mr-3 border border-stone-600" style="background-color: transparent; border: 2px dashed #FFD700;"></div>
+                            <span class="text-stone-300 capitalize">Adventure Route Path</span>
+                        </div>
                     </div>
                 `;
             }
@@ -1380,13 +1670,178 @@
             document.body.removeChild(link);
         };
 
+        // --- Event Listeners for Map Interactions (Dragging and Name Editing) ---
+
+        mapCanvas.addEventListener('mousedown', (e) => {
+            let currentOptions;
+            if (generationMode === 'world') {
+                currentOptions = worldMapOptions;
+            } else if (generationMode === 'dungeon') {
+                currentOptions = dungeonOptions;
+            } else if (generationMode === 'castle') {
+                currentOptions = castleOptions;
+            }
+
+            if (!currentOptions || !currentOptions.showAdventureRoute || currentOptions.adventureRoute.length === 0) {
+                return; // Only active if route is shown and exists
+            }
+
+            // Get mouse coordinates relative to canvas
+            const rect = mapCanvas.getBoundingClientRect();
+            const scaleX = mapCanvas.width / rect.width;
+            const scaleY = mapCanvas.height / rect.height;
+            const mouseX = (e.clientX - rect.left) * scaleX;
+            const mouseY = (e.clientY - rect.top) * scaleY;
+
+            // Check if clicking on a point for dragging
+            for (let i = 0; i < currentOptions.adventureRoute.length; i++) {
+                const point = currentOptions.adventureRoute[i];
+                const distance = Math.sqrt(Math.pow(mouseX - point.x, 2) + Math.pow(mouseY - point.y, 2));
+                if (distance < 10) { // Click within 10 pixels of the point center
+                    isDragging = true;
+                    draggedPointIndex = i;
+                    offsetX = mouseX - point.x;
+                    offsetY = mouseY - point.y;
+
+                    // If an input field is active, remove it
+                    if (nameInputEl) {
+                        nameInputEl.remove();
+                        nameInputEl = null;
+                    }
+                    return; // Found a point, stop checking
+                }
+            }
+        });
+
+        mapCanvas.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+
+            let currentOptions;
+            if (generationMode === 'world') {
+                currentOptions = worldMapOptions;
+            } else if (generationMode === 'dungeon') {
+                currentOptions = dungeonOptions;
+            } else if (generationMode === 'castle') {
+                currentOptions = castleOptions;
+            }
+
+            const rect = mapCanvas.getBoundingClientRect();
+            const scaleX = mapCanvas.width / rect.width;
+            const scaleY = mapCanvas.height / rect.height;
+            let mouseX = (e.clientX - rect.left) * scaleX;
+            let mouseY = (e.clientY - rect.top) * scaleY;
+
+            // Clamp coordinates to canvas bounds
+            mouseX = Math.max(0, Math.min(mouseX, mapCanvas.width));
+            mouseY = Math.max(0, Math.min(mouseY, mapCanvas.height));
+
+            currentOptions.adventureRoute[draggedPointIndex].x = mouseX - offsetX;
+            currentOptions.adventureRoute[draggedPointIndex].y = mouseY - offsetY;
+
+            renderMap(); // Redraw map with updated point position
+        });
+
+        mapCanvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            draggedPointIndex = -1;
+            // No need to redraw here, mousemove already did it or renderMap() will be called by click if it was a click
+        });
+
+        mapCanvas.addEventListener('click', (e) => {
+            // Only handle click for name editing if not dragging
+            if (isDragging) return;
+
+            let currentOptions;
+            if (generationMode === 'world') {
+                currentOptions = worldMapOptions;
+            } else if (generationMode === 'dungeon') {
+                currentOptions = dungeonOptions;
+            } else if (generationMode === 'castle') {
+                currentOptions = castleOptions;
+            }
+
+            if (!currentOptions || !currentOptions.showAdventureRoute || currentOptions.adventureRoute.length === 0) {
+                return;
+            }
+
+            // If an input field is already active, remove it before potentially creating a new one
+            if (nameInputEl) {
+                nameInputEl.remove();
+                nameInputEl = null;
+            }
+
+            // Only allow name editing for World and Dungeon maps
+            if (generationMode === 'castle') {
+                return;
+            }
+
+            const rect = mapCanvas.getBoundingClientRect();
+            const scaleX = mapCanvas.width / rect.width;
+            const scaleY = mapCanvas.height / rect.height;
+            const mouseX = (e.clientX - rect.left) * scaleX;
+            const mouseY = (e.clientY - rect.top) * scaleY;
+
+            // Check if clicking on a name's bounding box
+            for (let i = 0; i < currentOptions.adventureRoute.length; i++) {
+                const point = currentOptions.adventureRoute[i];
+                if (point.textBox) { // Ensure textBox exists
+                    const tb = point.textBox;
+                    // Check if mouseX, mouseY is within the text box
+                    if (mouseX >= tb.x && mouseX <= tb.x + tb.width &&
+                        mouseY >= tb.y && mouseY <= tb.y + tb.height) {
+
+                        // Create and position the input element
+                        nameInputEl = document.createElement('input');
+                        nameInputEl.type = 'text';
+                        nameInputEl.value = point.name;
+                        nameInputEl.classList.add('editable-name-input'); // Apply custom style
+
+                        // Calculate position relative to the mapContainer
+                        const mapContainerRect = mapContainer.getBoundingClientRect();
+                        const canvasRect = mapCanvas.getBoundingClientRect();
+
+                        // Convert canvas coordinates to screen coordinates relative to mapContainer
+                        const inputX = (point.x + 10) / scaleX + (canvasRect.left - mapContainerRect.left);
+                        const inputY = point.y / scaleY + (canvasRect.top - mapContainerRect.top) - (12 / 2); // Approximate font height / 2
+
+                        nameInputEl.style.left = `${inputX}px`;
+                        nameInputEl.style.top = `${inputY}px`;
+                        nameInputEl.style.width = `${tb.width / scaleX + 10}px`; // Add some padding
+                        nameInputEl.style.height = `${tb.height / scaleY + 5}px`; // Add some padding
+
+                        mapContainer.appendChild(nameInputEl);
+                        nameInputEl.focus();
+
+                        // Event listener for saving the name
+                        const saveName = () => {
+                            if (nameInputEl) {
+                                currentOptions.adventureRoute[i].name = nameInputEl.value;
+                                nameInputEl.remove();
+                                nameInputEl = null;
+                                renderMap(); // Redraw map with updated name
+                            }
+                        };
+
+                        nameInputEl.addEventListener('blur', saveName);
+                        nameInputEl.addEventListener('keydown', (event) => {
+                            if (event.key === 'Enter') {
+                                saveName();
+                            }
+                        });
+                        return; // Found a name, stop checking
+                    }
+                }
+            }
+        });
+
+
         // --- Initial Render and Mode Switching ---
         document.addEventListener('DOMContentLoaded', () => {
             // Set initial button active state
             document.getElementById('worldMapBtn').classList.add('bg-amber-800', 'text-white', 'shadow-lg');
             document.getElementById('worldMapBtn').classList.remove('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
 
-            resizeCanvas(); // Initial canvas sizing and map render
+            renderMap(); // Initial render
 
             document.getElementById('worldMapBtn').addEventListener('click', () => {
                 generationMode = 'world';
@@ -1396,7 +1851,7 @@
                 document.getElementById('dungeonBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
                 document.getElementById('castleBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
                 document.getElementById('castleBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
-                resizeCanvas(); // Recalculate and redraw for new mode
+                renderMap();
             });
 
             document.getElementById('dungeonBtn').addEventListener('click', () => {
@@ -1407,7 +1862,7 @@
                 document.getElementById('worldMapBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
                 document.getElementById('castleBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
                 document.getElementById('castleBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
-                resizeCanvas(); // Recalculate and redraw for new mode
+                renderMap();
             });
 
             document.getElementById('castleBtn').addEventListener('click', () => {
@@ -1418,12 +1873,8 @@
                 document.getElementById('worldMapBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
                 document.getElementById('dungeonBtn').classList.remove('bg-amber-800', 'text-white', 'shadow-lg');
                 document.getElementById('dungeonBtn').classList.add('bg-stone-700', 'text-stone-300', 'hover:bg-stone-600');
-                resizeCanvas(); // Recalculate and redraw for new mode
+                renderMap();
             });
-
-            // Add event listener for window resize
-            window.addEventListener('resize', resizeCanvas);
         });
     </script>
 </body>
-</html>
